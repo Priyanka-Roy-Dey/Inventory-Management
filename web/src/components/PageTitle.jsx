@@ -1,8 +1,8 @@
 import { Typography } from '@mui/material'
 
-function PageTitle({ children }) {
+function PageTitle({ children, align }) {
   return (
-    <Typography variant="h4" component="h1" gutterBottom>
+    <Typography variant="h4" component="h1" align={align} gutterBottom>
       {children}
     </Typography>
   )
