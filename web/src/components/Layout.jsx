@@ -1,15 +1,20 @@
 import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material'
 import { NavLink, Outlet } from 'react-router'
+import { CAN_IMPORT, CAN_MANAGE_USERS, ROLE_LABELS } from '../auth/roles'
+import useAuth from '../auth/useAuth'
 
 const NAV_LINKS = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/items', label: 'Items' },
   { to: '/alerts', label: 'Alerts' },
-  { to: '/import', label: 'Import' },
-  { to: '/users', label: 'Users' },
+  { to: '/import', label: 'Import', roles: CAN_IMPORT },
+  { to: '/users', label: 'Users', roles: CAN_MANAGE_USERS },
 ]
 
 function Layout() {
+  const { user, logout } = useAuth()
+  const visibleLinks = NAV_LINKS.filter(({ roles }) => !roles || roles.includes(user.role))
+
   return (
     <>
       <AppBar position="static">
@@ -18,7 +23,7 @@ function Layout() {
             InventoryApp
           </Typography>
           <Box component="nav" aria-label="Main" sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {NAV_LINKS.map(({ to, label, end }) => (
+            {visibleLinks.map(({ to, label, end }) => (
               <Button
                 key={to}
                 component={NavLink}
@@ -30,6 +35,14 @@ function Layout() {
                 {label}
               </Button>
             ))}
+          </Box>
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography component="span" variant="body2">
+              {user.username} ({ROLE_LABELS[user.role]})
+            </Typography>
+            <Button color="inherit" variant="outlined" onClick={logout}>
+              Sign out
+            </Button>
           </Box>
         </Toolbar>
       </AppBar>
