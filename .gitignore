@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Java / Maven / Gradle
+target/
+build/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.log
+hs_err_pid*
+
+# Node / React
+node_modules/
+dist/
+coverage/
+.eslintcache
+npm-debug.log*
+yarn-error.log*
+
+# Environment and secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# AWS / infrastructure build output
+.aws-sam/
+packaged*.yaml
+cdk.out/
