@@ -10,7 +10,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   server.resetHandlers()
-  sessionStorage.clear()
+  globalThis.sessionStorage?.clear()
 })
 
 afterAll(() => {

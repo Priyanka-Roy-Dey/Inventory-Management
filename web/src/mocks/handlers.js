@@ -8,7 +8,7 @@ const SEEDED_USERS = [
 ]
 
 export const handlers = [
-  http.post('/api/auth/login', async ({ request }) => {
+  http.post('*/api/auth/login', async ({ request }) => {
     const { username, password } = await request.json()
     const user = SEEDED_USERS.find((u) => u.username === username && u.password === password)
 
