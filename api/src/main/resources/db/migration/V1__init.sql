@@ -1,0 +1,3 @@
+-- Baseline migration so Flyway starts tracking the schema at version 1.
+-- Tables are added by later migrations: users (INV-4), items (INV-6),
+-- stock movements (INV-9), outbox (INV-10), import jobs (INV-21).
