@@ -1,9 +1,11 @@
+# Local development database. Spring Boot starts it on `./mvnw spring-boot:run`.
+# These credentials are for this throwaway local database only.
 services:
   postgres:
-    image: 'postgres:latest'
+    image: 'postgres:17'
     environment:
-      - 'POSTGRES_DB=mydatabase'
-      - 'POSTGRES_PASSWORD=secret'
-      - 'POSTGRES_USER=myuser'
+      - 'POSTGRES_DB=inventory'
+      - 'POSTGRES_USER=inventory'
+      - 'POSTGRES_PASSWORD=inventory'
     ports:
       - '5432'
