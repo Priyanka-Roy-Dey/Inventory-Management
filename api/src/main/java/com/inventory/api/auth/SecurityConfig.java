@@ -21,8 +21,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Stateless security: every request outside {@link #PUBLIC_PATHS} needs a valid bearer token. Any role may
- * read; only Staff and Admin may write.
+ * Stateless security: every request outside {@link #PUBLIC_PATHS} needs a valid bearer token. User management
+ * is Admin only; otherwise any role may read and only Staff and Admin may write.
  */
 @Configuration
 public class SecurityConfig {
@@ -36,6 +36,7 @@ public class SecurityConfig {
 		http.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(requests -> requests.requestMatchers(PUBLIC_PATHS).permitAll()
+				.requestMatchers("/api/users", "/api/users/**").hasRole(Role.ADMIN.name())
 				.requestMatchers(HttpMethod.GET, "/api/**").authenticated()
 				.requestMatchers("/api/**").hasAnyRole(Role.STAFF.name(), Role.ADMIN.name())
 				.anyRequest()
