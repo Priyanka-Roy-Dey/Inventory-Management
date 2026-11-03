@@ -1,5 +1,6 @@
 package com.inventory.api.error;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -22,7 +23,7 @@ class UnknownRouteTests {
 
 	@Test
 	void unknownUrlReturnsNotFoundAsJson() throws Exception {
-		mockMvc.perform(get("/api/does-not-exist"))
+		mockMvc.perform(get("/api/does-not-exist").with(jwt()))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.message").value("Resource not found"))
 			.andExpect(jsonPath("$.timestamp").doesNotExist());
