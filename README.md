@@ -21,11 +21,46 @@ A web application where staff track stock levels, record stock movements, import
 
 ## Prerequisites
 
-_To be completed in INV-3 / INV-8._
+- Java 17 (Temurin)
+- Node.js and npm (for `web/`)
+- A Docker runtime. On macOS we use [Colima](https://github.com/abiosoft/colima) instead of Docker Desktop:
+  ```bash
+  brew install colima docker && colima start
+  ```
+  Then add these to `~/.zshrc` so Testcontainers and Spring Boot find Colima:
+  ```bash
+  export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
+  export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+  ```
 
 ## Running locally
 
-_To be completed in INV-3 / INV-8._
+### API (`api/`)
+
+The first Admin is created at startup from two environment variables (only if no Admin exists yet). Choose your own values; never commit them.
+
+```bash
+cd api
+export INVENTORY_ADMIN_USERNAME=admin
+export INVENTORY_ADMIN_PASSWORD='choose-a-strong-password'
+./mvnw spring-boot:run
+```
+
+Spring Boot starts Postgres from `compose.yaml`. The API runs on `http://localhost:8080`:
+
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Health: `http://localhost:8080/actuator/health`
+- Postman: import the files in `api/postman/`
+
+Run the tests (Postgres is started by Testcontainers):
+
+```bash
+./mvnw verify
+```
+
+### Web (`web/`)
+
+_To be completed with the Vite proxy (INV-8 follow-up)._
 
 ## Deploying
 
