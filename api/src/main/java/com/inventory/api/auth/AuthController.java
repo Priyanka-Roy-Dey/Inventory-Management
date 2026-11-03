@@ -21,4 +21,9 @@ public class AuthController {
 		return auth.login(request.username(), request.password());
 	}
 
+	@PostMapping("/refresh")
+	public LoginResponse refresh(@Valid @RequestBody RefreshRequest request) {
+		return auth.refresh(request.refreshToken());
+	}
+
 }

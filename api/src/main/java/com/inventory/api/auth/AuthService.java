@@ -19,17 +19,21 @@ public class AuthService {
 
 	private final TokenService tokens;
 
+	private final RefreshTokenService refreshTokens;
+
 	// Checked when the username is unknown, so a wrong username takes as long as a wrong password.
 	private final String unknownUserHash;
 
-	public AuthService(UserRepository users, PasswordEncoder passwordEncoder, TokenService tokens) {
+	public AuthService(UserRepository users, PasswordEncoder passwordEncoder, TokenService tokens,
+			RefreshTokenService refreshTokens) {
 		this.users = users;
 		this.passwordEncoder = passwordEncoder;
 		this.tokens = tokens;
+		this.refreshTokens = refreshTokens;
 		this.unknownUserHash = passwordEncoder.encode("unknown-user");
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public LoginResponse login(String username, String password) {
 		Optional<User> user = users.findByUsername(username);
 		boolean passwordMatches = passwordEncoder.matches(password,
@@ -37,8 +41,17 @@ public class AuthService {
 		if (user.isEmpty() || !passwordMatches) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
 		}
-		return new LoginResponse(tokens.issue(user.get()),
-				new UserSummary(user.get().getUsername(), user.get().getRole()));
+		return issueTokens(user.get());
+	}
+
+	@Transactional
+	public LoginResponse refresh(String refreshToken) {
+		return issueTokens(refreshTokens.consume(refreshToken));
+	}
+
+	private LoginResponse issueTokens(User user) {
+		return new LoginResponse(tokens.issue(user), refreshTokens.issue(user),
+				new UserSummary(user.getUsername(), user.getRole()));
 	}
 
 }

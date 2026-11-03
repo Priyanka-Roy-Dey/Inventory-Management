@@ -78,7 +78,9 @@ JWTs issued by the API (Spring Security), signed with RS256. The private key is 
 | A18 | Alerts use the outbox pattern. | See 2.5. |
 | A19 | `ecr:GetAuthorizationToken` keeps `Resource: "*"`. | AWS does not support resource-level permissions for this action. |
 | A20 | Single-AZ RDS and one NAT gateway in the sandbox. | Cost. Production would use Multi-AZ RDS and a NAT gateway per AZ. |
-| A21 | Access tokens last 15 minutes (`inventory.jwt.access-token-ttl`). A refresh token is added in INV-4 part 2. | Short-lived tokens limit the damage of a leaked token. |
+| A21 | Access tokens last 15 minutes (`inventory.jwt.access-token-ttl`). `POST /api/auth/refresh` exchanges a refresh token for a new pair. | Short-lived tokens limit the damage of a leaked token. |
 | A22 | Locally, the API generates its RS256 key pair at startup, so tokens stop working after a restart. In AWS the key comes from Secrets Manager so every ECS task shares it (INV-14/15). | No key file to manage or commit during development. |
 | A23 | Login returns the same `401 Invalid username or password` for an unknown user and a wrong password, and both take the same time. | Does not reveal which usernames exist. |
 | A24 | Usernames are case-sensitive and unique. | Simplest rule; Admins create all users (A1). |
+| A25 | Refresh tokens are random 256-bit strings, last 7 days (`inventory.jwt.refresh-token-ttl`), are stored only as SHA-256 hashes and can be used once (rotation). They are returned in the JSON body, not a cookie. | A database leak exposes no usable tokens; rotation limits a stolen token's lifetime. A body token keeps the SPA and API simple across origins. |
+| A26 | Any signed-in role may call `GET /api/**`; other methods need Staff or Admin. Admin-only actions add their own rule on the endpoint. | Matches the Viewer read-only role with one rule. |
