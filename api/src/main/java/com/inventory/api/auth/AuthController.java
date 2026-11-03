@@ -2,6 +2,8 @@ package com.inventory.api.auth;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import jakarta.validation.Valid;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,6 +29,12 @@ public class AuthController {
 	@PostMapping("/refresh")
 	public LoginResponse refresh(@Valid @RequestBody RefreshRequest request) {
 		return auth.refresh(request.refreshToken());
+	}
+
+	@PostMapping("/change-password")
+	public LoginResponse changePassword(@AuthenticationPrincipal Jwt jwt,
+			@Valid @RequestBody ChangePasswordRequest request) {
+		return auth.changePassword(jwt.getSubject(), request.currentPassword(), request.newPassword());
 	}
 
 }

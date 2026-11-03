@@ -23,6 +23,10 @@
     {
       "key": "refreshToken",
       "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
     }
   ],
   "item": [
@@ -242,6 +246,54 @@
           ]
         },
         {
+          "name": "Change password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Works for any signed-in user, and is the only call allowed while mustChangePassword is true. Update the `password` environment value afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"choose-a-new-password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('flag cleared', () => pm.expect(body.user.mustChangePassword).to.eql(false));",
+                  "pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Login - wrong password",
           "request": {
             "method": "POST",
@@ -333,7 +385,8 @@
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "const body = pm.response.json();",
                   "pm.test('must change password', () => pm.expect(body.user.mustChangePassword).to.eql(true));",
-                  "pm.test('temporary password returned once', () => pm.expect(body.temporaryPassword).to.have.length.of.at.least(16));"
+                  "pm.test('temporary password returned once', () => pm.expect(body.temporaryPassword).to.have.length.of.at.least(16));",
+                  "pm.collectionVariables.set('userId', body.user.id);"
                 ]
               }
             }
@@ -363,6 +416,45 @@
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('no password hashes', () => pm.response.json().forEach(u => pm.expect(u).to.not.have.property('passwordHash')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "reset-password"
+              ]
+            },
+            "description": "Uses the id saved by Create user. Gives the user a new temporary password and signs them out everywhere."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('user must change password', () => pm.expect(body.user.mustChangePassword).to.eql(true));",
+                  "pm.test('new temporary password', () => pm.expect(body.temporaryPassword).to.have.length.of.at.least(16));"
                 ]
               }
             }

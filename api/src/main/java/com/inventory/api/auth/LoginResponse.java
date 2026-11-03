@@ -4,7 +4,7 @@ import com.inventory.api.user.Role;
 
 public record LoginResponse(String accessToken, String refreshToken, UserSummary user) {
 
-	public record UserSummary(String username, Role role) {
+	public record UserSummary(String username, Role role, boolean mustChangePassword) {
 	}
 
 }
