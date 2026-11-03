@@ -1,5 +1,6 @@
 package com.inventory.api.auth;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,11 +17,13 @@ public class AuthController {
 		this.auth = auth;
 	}
 
+	@SecurityRequirements
 	@PostMapping("/login")
 	public LoginResponse login(@Valid @RequestBody LoginRequest request) {
 		return auth.login(request.username(), request.password());
 	}
 
+	@SecurityRequirements
 	@PostMapping("/refresh")
 	public LoginResponse refresh(@Valid @RequestBody RefreshRequest request) {
 		return auth.refresh(request.refreshToken());
