@@ -29,6 +29,9 @@ public class User {
 	@Column(nullable = false, length = 20)
 	private Role role;
 
+	@Column(name = "must_change_password", nullable = false)
+	private boolean mustChangePassword;
+
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -37,9 +40,14 @@ public class User {
 	}
 
 	public User(String username, String passwordHash, Role role) {
+		this(username, passwordHash, role, false);
+	}
+
+	public User(String username, String passwordHash, Role role, boolean mustChangePassword) {
 		this.username = username;
 		this.passwordHash = passwordHash;
 		this.role = role;
+		this.mustChangePassword = mustChangePassword;
 	}
 
 	public Long getId() {
@@ -56,6 +64,10 @@ public class User {
 
 	public Role getRole() {
 		return role;
+	}
+
+	public boolean isMustChangePassword() {
+		return mustChangePassword;
 	}
 
 	public Instant getCreatedAt() {
