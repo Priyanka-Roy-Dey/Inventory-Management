@@ -28,6 +28,22 @@ class ApiDocsTests {
 	}
 
 	@Test
+	void declaresBearerJwtAuthForEveryEndpoint() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
+			.andExpect(jsonPath("$.security[0].bearerAuth").isArray());
+	}
+
+	@Test
+	void loginAndRefreshNeedNoToken() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+			.andExpect(jsonPath("$.paths['/api/auth/login'].post.security").isEmpty())
+			.andExpect(jsonPath("$.paths['/api/auth/refresh'].post.security").isEmpty());
+	}
+
+	@Test
 	void servesTheSwaggerUi() throws Exception {
 		mockMvc.perform(get("/swagger-ui/index.html"))
 			.andExpect(status().isOk());
