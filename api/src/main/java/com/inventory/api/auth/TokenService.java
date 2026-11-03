@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TokenService {
 
+	static final String MUST_CHANGE_PASSWORD_CLAIM = "must_change_password";
+
 	private final JwtEncoder encoder;
 
 	private final Clock clock;
@@ -36,6 +38,7 @@ public class TokenService {
 			.issuedAt(now)
 			.expiresAt(now.plus(accessTokenTtl))
 			.claim("role", user.getRole().name())
+			.claim(MUST_CHANGE_PASSWORD_CLAIM, user.isMustChangePassword())
 			.build();
 		JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).build();
 		return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

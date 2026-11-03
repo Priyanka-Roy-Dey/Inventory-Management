@@ -66,6 +66,22 @@ public class User {
 		return role;
 	}
 
+	/**
+	 * The user chose a new password; the forced change is done.
+	 */
+	public void changePassword(String newPasswordHash) {
+		this.passwordHash = newPasswordHash;
+		this.mustChangePassword = false;
+	}
+
+	/**
+	 * An Admin issued a temporary password, which the user must replace at the next sign-in.
+	 */
+	public void resetPassword(String temporaryPasswordHash) {
+		this.passwordHash = temporaryPasswordHash;
+		this.mustChangePassword = true;
+	}
+
 	public boolean isMustChangePassword() {
 		return mustChangePassword;
 	}

@@ -60,6 +60,14 @@ public class RefreshTokenService {
 		return stored.getUser();
 	}
 
+	/**
+	 * Signs the user out everywhere: no existing refresh token can be used again.
+	 */
+	@Transactional
+	public void revokeAll(User user) {
+		refreshTokens.deleteAllFor(user);
+	}
+
 	static String hash(String token) {
 		try {
 			byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));

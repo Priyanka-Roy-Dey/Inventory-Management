@@ -49,9 +49,28 @@ public class AuthService {
 		return issueTokens(refreshTokens.consume(refreshToken));
 	}
 
+	/**
+	 * Replaces the signed-in user's password, signs them out of other sessions and returns fresh tokens.
+	 */
+	@Transactional
+	public LoginResponse changePassword(String username, String currentPassword, String newPassword) {
+		User user = users.findByUsername(username)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
+		if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+		}
+		if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"New password must be different from the current password");
+		}
+		user.changePassword(passwordEncoder.encode(newPassword));
+		refreshTokens.revokeAll(user);
+		return issueTokens(user);
+	}
+
 	private LoginResponse issueTokens(User user) {
 		return new LoginResponse(tokens.issue(user), refreshTokens.issue(user),
-				new UserSummary(user.getUsername(), user.getRole()));
+				new UserSummary(user.getUsername(), user.getRole(), user.isMustChangePassword()));
 	}
 
 }
