@@ -1,5 +1,11 @@
 package com.inventory.api.auth;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.KeyUse;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
@@ -34,9 +40,7 @@ public class JwtConfig {
 
 	@Bean
 	JwtEncoder jwtEncoder(KeyPair jwtSigningKeyPair) {
-		return NimbusJwtEncoder
-			.withKeyPair((RSAPublicKey) jwtSigningKeyPair.getPublic(), (RSAPrivateKey) jwtSigningKeyPair.getPrivate())
-			.build();
+		return new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(signingKey(jwtSigningKeyPair))));
 	}
 
 	@Bean
@@ -50,6 +54,22 @@ public class JwtConfig {
 	@Bean
 	Clock clock() {
 		return Clock.systemUTC();
+	}
+
+	/**
+	 * The key as a JWK. Its {@code kid} is the RFC 7638 thumbprint, so the same key always has the same id.
+	 */
+	static RSAKey signingKey(KeyPair keyPair) {
+		try {
+			return new RSAKey.Builder((RSAPublicKey) keyPair.getPublic()).privateKey((RSAPrivateKey) keyPair.getPrivate())
+				.keyUse(KeyUse.SIGNATURE)
+				.algorithm(JWSAlgorithm.RS256)
+				.keyIDFromThumbprint()
+				.build();
+		}
+		catch (JOSEException ex) {
+			throw new IllegalStateException("Could not compute the key id", ex);
+		}
 	}
 
 	static KeyPair generateRsaKeyPair() {

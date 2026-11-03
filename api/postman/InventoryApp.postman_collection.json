@@ -90,6 +90,43 @@
               }
             }
           ]
+        },
+        {
+          "name": "JWKS (public signing key)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const key = pm.response.json().keys[0];",
+                  "pm.test('one RS256 signing key with a kid', () => {",
+                  "  pm.expect(key.alg).to.eql('RS256');",
+                  "  pm.expect(key.kid).to.be.a('string');",
+                  "});",
+                  "pm.test('no private key fields', () => pm.expect(key).to.not.have.any.keys('d', 'p', 'q'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/.well-known/jwks.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ".well-known",
+                "jwks.json"
+              ]
+            }
+          }
         }
       ]
     },
