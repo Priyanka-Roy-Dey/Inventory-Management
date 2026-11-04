@@ -39,7 +39,29 @@ function validate(values) {
   return errors
 }
 
-function toRequestBody(values) {
+function fromItem(item) {
+  return {
+    sku: item.sku,
+    name: item.name,
+    category: item.category,
+    quantity: String(item.quantity),
+    reorderLevel: String(item.reorderLevel),
+    unitPrice: Number(item.unitPrice).toFixed(2),
+  }
+}
+
+// Editing sends only the editable fields and the version it started from (A33).
+function toUpdateBody(values, version) {
+  return {
+    name: values.name.trim(),
+    category: values.category.trim(),
+    reorderLevel: Number(values.reorderLevel),
+    unitPrice: Number(values.unitPrice),
+    version,
+  }
+}
+
+function toCreateBody(values) {
   return {
     sku: values.sku.trim(),
     name: values.name.trim(),
@@ -51,21 +73,34 @@ function toRequestBody(values) {
 }
 
 const FIELDS = [
-  { name: 'sku', label: 'SKU', helperText: 'Letters, digits, ".", "_" and "-"', autoFocus: true },
+  {
+    name: 'sku',
+    label: 'SKU',
+    helperText: 'Letters, digits, ".", "_" and "-"',
+    readOnlyText: 'Cannot be changed',
+  },
   { name: 'name', label: 'Name' },
   { name: 'category', label: 'Category' },
-  { name: 'quantity', label: 'Quantity', inputMode: 'numeric' },
+  {
+    name: 'quantity',
+    label: 'Quantity',
+    inputMode: 'numeric',
+    readOnlyText: 'Changed through stock movements',
+  },
   { name: 'reorderLevel', label: 'Reorder level', inputMode: 'numeric' },
   { name: 'unitPrice', label: 'Unit price', inputMode: 'decimal' },
 ]
 
 /**
- * Collects a new item. `onSave` receives the request body and should throw an error with a message on failure.
+ * Adds a new item, or edits `item` when given. `onSave` receives the request body and throws an error with a
+ * message (and `status`) on failure. When editing, `onReload` returns the latest copy of the item.
  */
-function ItemFormDialog({ onSave, onClose }) {
-  const [values, setValues] = useState(EMPTY)
+function ItemFormDialog({ item, onSave, onReload, onClose }) {
+  const editing = Boolean(item)
+  const [values, setValues] = useState(editing ? fromItem(item) : EMPTY)
+  const [version, setVersion] = useState(item?.version)
   const [errors, setErrors] = useState({})
-  const [serverError, setServerError] = useState('')
+  const [serverError, setServerError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   function handleChange(event) {
@@ -76,47 +111,74 @@ function ItemFormDialog({ onSave, onClose }) {
     event.preventDefault()
     const newErrors = validate(values)
     setErrors(newErrors)
-    setServerError('')
+    setServerError(null)
     if (Object.keys(newErrors).length > 0) {
       return
     }
 
     setSubmitting(true)
     try {
-      await onSave(toRequestBody(values))
+      await onSave(editing ? toUpdateBody(values, version) : toCreateBody(values))
     } catch (error) {
-      setServerError(error.message)
+      setServerError({ message: error.message, changedElsewhere: editing && error.status === 409 })
       setSubmitting(false)
+    }
+  }
+
+  // Someone else saved first: start again from their version.
+  async function reload() {
+    try {
+      const latest = await onReload()
+      setValues(fromItem(latest))
+      setVersion(latest.version)
+      setErrors({})
+      setServerError(null)
+    } catch (error) {
+      setServerError({ message: error.message, changedElsewhere: false })
     }
   }
 
   return (
     <Dialog open onClose={onClose} aria-labelledby="item-form-title" fullWidth maxWidth="sm">
       <Box component="form" noValidate onSubmit={handleSubmit}>
-        <DialogTitle id="item-form-title">Add item</DialogTitle>
+        <DialogTitle id="item-form-title">{editing ? 'Edit item' : 'Add item'}</DialogTitle>
         <DialogContent>
           {serverError && (
-            <Alert severity="error" sx={{ mb: 1 }}>
-              {serverError}
+            <Alert
+              severity="error"
+              sx={{ mb: 1 }}
+              action={
+                serverError.changedElsewhere && (
+                  <Button color="inherit" size="small" onClick={reload}>
+                    Reload
+                  </Button>
+                )
+              }
+            >
+              {serverError.message}
             </Alert>
           )}
-          {FIELDS.map(({ name, label, helperText, autoFocus, inputMode }) => (
-            <TextField
-              key={name}
-              id={name}
-              name={name}
-              label={label}
-              value={values[name]}
-              onChange={handleChange}
-              error={Boolean(errors[name])}
-              helperText={errors[name] ?? helperText}
-              required
-              fullWidth
-              margin="dense"
-              autoFocus={autoFocus}
-              slotProps={inputMode ? { htmlInput: { inputMode } } : undefined}
-            />
-          ))}
+          {FIELDS.map(({ name, label, helperText, readOnlyText, inputMode }, index) => {
+            const readOnly = editing && Boolean(readOnlyText)
+            return (
+              <TextField
+                key={name}
+                id={name}
+                name={name}
+                label={label}
+                value={values[name]}
+                onChange={handleChange}
+                error={Boolean(errors[name])}
+                helperText={errors[name] ?? (readOnly ? readOnlyText : helperText)}
+                disabled={readOnly}
+                required={!readOnly}
+                fullWidth
+                margin="dense"
+                autoFocus={editing ? name === 'name' : index === 0}
+                slotProps={inputMode ? { htmlInput: { inputMode } } : undefined}
+              />
+            )
+          })}
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Cancel</Button>

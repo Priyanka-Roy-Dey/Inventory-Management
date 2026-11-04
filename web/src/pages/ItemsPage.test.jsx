@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
@@ -223,5 +223,195 @@ describe('ItemsPage Add item', () => {
     dialog = await openAddItem()
 
     expect(within(dialog).getByLabelText(/^SKU/)).toHaveValue('')
+  })
+})
+
+function rowFor(sku) {
+  return screen.getByText(sku).closest('tr')
+}
+
+describe('ItemsPage row actions', () => {
+  it('shows Edit to Staff but Delete only to Admin', async () => {
+    serveItems([PAPER])
+    renderPage('STAFF')
+
+    await screen.findByText('PAP-A4')
+    expect(screen.getByRole('button', { name: 'Edit PAP-A4' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete PAP-A4' })).not.toBeInTheDocument()
+  })
+
+  it('shows both to Admin and neither to Viewer', async () => {
+    serveItems([PAPER])
+    renderPage('ADMIN')
+    expect(await screen.findByRole('button', { name: 'Delete PAP-A4' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit PAP-A4' })).toBeInTheDocument()
+  })
+
+  it('offers no actions to a Viewer', async () => {
+    serveItems([PAPER])
+    renderPage('VIEWER')
+
+    await screen.findByText('PAP-A4')
+    expect(screen.queryByRole('button', { name: 'Edit PAP-A4' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ItemsPage Edit item', () => {
+  async function openEdit() {
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit PAP-A4' }))
+    return screen.findByRole('dialog', { name: 'Edit item' })
+  }
+
+  it('starts from the current values and keeps SKU and quantity read-only', async () => {
+    serveItems([PAPER])
+    renderPage()
+    const dialog = await openEdit()
+
+    expect(within(dialog).getByLabelText(/^SKU/)).toHaveValue('PAP-A4')
+    expect(within(dialog).getByLabelText(/^SKU/)).toBeDisabled()
+    expect(within(dialog).getByLabelText(/^Quantity/)).toHaveValue('40')
+    expect(within(dialog).getByLabelText(/^Quantity/)).toBeDisabled()
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue('A4 paper')
+    expect(within(dialog).getByLabelText(/^Unit price/)).toHaveValue('4.50')
+  })
+
+  it('saves the changes with the version it read and updates the row', async () => {
+    let body
+    serveItems([PAPER])
+    server.use(
+      http.put('/api/items/1', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ ...PAPER, name: 'A4 paper, 80gsm', version: 1 })
+      }),
+    )
+    renderPage()
+    const dialog = await openEdit()
+
+    await fillForm(dialog, { Name: 'A4 paper, 80gsm' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('A4 paper, 80gsm')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(body).toEqual({
+      name: 'A4 paper, 80gsm',
+      category: 'Stationery',
+      reorderLevel: 10,
+      unitPrice: 4.5,
+      version: 0,
+    })
+  })
+
+  it('blocks an invalid edit', async () => {
+    let called = false
+    serveItems([PAPER])
+    server.use(
+      http.put('/api/items/1', () => {
+        called = true
+        return HttpResponse.json(PAPER)
+      }),
+    )
+    renderPage()
+    const dialog = await openEdit()
+
+    await userEvent.clear(within(dialog).getByLabelText(/^Name/))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(within(dialog).getByText('Name is required')).toBeInTheDocument()
+    expect(called).toBe(false)
+  })
+
+  it('reloads the latest values after someone else saved first', async () => {
+    const latest = { ...PAPER, name: 'Renamed by someone else', version: 1 }
+    const versionsSent = []
+    serveItems([PAPER])
+    server.use(
+      http.put('/api/items/1', async ({ request }) => {
+        const { version } = await request.json()
+        versionsSent.push(version)
+        return version === 1
+          ? HttpResponse.json({ ...latest, category: 'Office', version: 2 })
+          : HttpResponse.json(
+              { message: 'Item was changed by someone else. Reload it and try again.' },
+              { status: 409 },
+            )
+      }),
+      http.get('/api/items/1', () => HttpResponse.json(latest)),
+    )
+    renderPage()
+    const dialog = await openEdit()
+
+    await fillForm(dialog, { Category: 'Office' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Item was changed by someone else')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reload' }))
+    expect(await within(dialog).findByDisplayValue('Renamed by someone else')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+
+    await fillForm(dialog, { Category: 'Office' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Office')).toBeInTheDocument()
+    expect(versionsSent).toEqual([0, 1])
+  })
+})
+
+describe('ItemsPage Delete item', () => {
+  async function openDelete() {
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete PAP-A4' }))
+    return screen.findByRole('dialog', { name: 'Delete PAP-A4?' })
+  }
+
+  it('removes the item after confirmation', async () => {
+    let deleted = false
+    serveItems([CABLE, PAPER])
+    server.use(
+      http.delete('/api/items/1', () => {
+        deleted = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderPage('ADMIN')
+    const dialog = await openDelete()
+
+    expect(within(dialog).getByText(/its SKU can't be reused/i)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(screen.queryByText('PAP-A4')).not.toBeInTheDocument())
+    expect(deleted).toBe(true)
+    expect(screen.getByText('CBL-USB')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps the item when cancelled', async () => {
+    let deleted = false
+    serveItems([PAPER])
+    server.use(
+      http.delete('/api/items/1', () => {
+        deleted = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderPage('ADMIN')
+    const dialog = await openDelete()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(rowFor('PAP-A4')).toBeInTheDocument()
+    expect(deleted).toBe(false)
+  })
+
+  it('shows the error when the delete fails', async () => {
+    serveItems([PAPER])
+    server.use(
+      http.delete('/api/items/1', () => HttpResponse.json({ message: 'Item not found' }, { status: 404 })),
+    )
+    renderPage('ADMIN')
+    const dialog = await openDelete()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Item not found')
   })
 })

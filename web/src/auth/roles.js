@@ -5,5 +5,6 @@ export const ROLE_LABELS = {
 }
 
 export const CAN_EDIT_ITEMS = ['ADMIN', 'STAFF']
+export const CAN_DELETE_ITEMS = ['ADMIN']
 export const CAN_IMPORT = ['ADMIN', 'STAFF']
 export const CAN_MANAGE_USERS = ['ADMIN']

@@ -14,8 +14,9 @@ import {
   Typography,
 } from '@mui/material'
 import { useEffect, useEffectEvent, useState } from 'react'
-import { CAN_EDIT_ITEMS } from '../auth/roles'
+import { CAN_DELETE_ITEMS, CAN_EDIT_ITEMS } from '../auth/roles'
 import useAuth from '../auth/useAuth'
+import DeleteItemDialog from '../components/DeleteItemDialog'
 import ItemFormDialog from '../components/ItemFormDialog'
 import PageTitle from '../components/PageTitle'
 
@@ -27,7 +28,8 @@ function bySku(a, b) {
   return a.sku.localeCompare(b.sku)
 }
 
-function ItemsTable({ items }) {
+function ItemsTable({ items, onEdit, onDelete }) {
+  const hasActions = Boolean(onEdit || onDelete)
   return (
     <TableContainer component={Paper}>
       <Table aria-label="Items" size="small">
@@ -40,6 +42,7 @@ function ItemsTable({ items }) {
             <TableCell align="right">Reorder level</TableCell>
             <TableCell align="right">Unit price</TableCell>
             <TableCell>Status</TableCell>
+            {hasActions && <TableCell align="right">Actions</TableCell>}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -52,6 +55,25 @@ function ItemsTable({ items }) {
               <TableCell align="right">{item.reorderLevel}</TableCell>
               <TableCell align="right">{formatPrice(item.unitPrice)}</TableCell>
               <TableCell>{item.lowStock && <Chip label="Low stock" color="warning" size="small" />}</TableCell>
+              {hasActions && (
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  {onEdit && (
+                    <Button size="small" aria-label={`Edit ${item.sku}`} onClick={() => onEdit(item)}>
+                      Edit
+                    </Button>
+                  )}
+                  {onDelete && (
+                    <Button
+                      size="small"
+                      color="error"
+                      aria-label={`Delete ${item.sku}`}
+                      onClick={() => onDelete(item)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
@@ -62,10 +84,14 @@ function ItemsTable({ items }) {
 
 function ItemsPage() {
   const { user, request } = useAuth()
-  const [state, setState] = useState({ status: 'loading' })
+  // `items` is always an array, so every read is safe whatever the status.
+  const [state, setState] = useState({ status: 'loading', items: [] })
   const [attempt, setAttempt] = useState(0)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
   const canEdit = CAN_EDIT_ITEMS.includes(user.role)
+  const canDelete = CAN_DELETE_ITEMS.includes(user.role)
 
   const fetchItems = useEffectEvent(() => request('/items'))
 
@@ -73,7 +99,7 @@ function ItemsPage() {
     let ignore = false
     fetchItems().then(
       (items) => !ignore && setState({ status: 'ready', items }),
-      (error) => !ignore && setState({ status: 'error', message: error.message }),
+      (error) => !ignore && setState({ status: 'error', message: error.message, items: [] }),
     )
     return () => {
       ignore = true
@@ -81,14 +107,31 @@ function ItemsPage() {
   }, [attempt])
 
   function retry() {
-    setState({ status: 'loading' })
+    setState({ status: 'loading', items: [] })
     setAttempt(attempt + 1)
   }
 
   async function createItem(body) {
     const created = await request('/items', { method: 'POST', body })
-    setState({ status: 'ready', items: [...(state.items ?? []), created].sort(bySku) })
+    setState({ status: 'ready', items: [...state.items, created].sort(bySku) })
     setAdding(false)
+  }
+
+  // These take the item rather than reading editing/deleting, which are null while no dialog is open.
+  async function updateItem(item, body) {
+    const updated = await request(`/items/${item.id}`, { method: 'PUT', body })
+    setState({ status: 'ready', items: state.items.map((each) => (each.id === updated.id ? updated : each)) })
+    setEditing(null)
+  }
+
+  function reloadItem(item) {
+    return request(`/items/${item.id}`)
+  }
+
+  async function deleteItem(item) {
+    await request(`/items/${item.id}`, { method: 'DELETE' })
+    setState({ status: 'ready', items: state.items.filter((each) => each.id !== item.id) })
+    setDeleting(null)
   }
 
   return (
@@ -115,8 +158,25 @@ function ItemsPage() {
         </Alert>
       )}
       {state.status === 'ready' && state.items.length === 0 && <Typography>No items yet.</Typography>}
-      {state.status === 'ready' && state.items.length > 0 && <ItemsTable items={state.items} />}
+      {state.status === 'ready' && state.items.length > 0 && (
+        <ItemsTable
+          items={state.items}
+          onEdit={canEdit ? setEditing : undefined}
+          onDelete={canDelete ? setDeleting : undefined}
+        />
+      )}
       {adding && <ItemFormDialog onSave={createItem} onClose={() => setAdding(false)} />}
+      {editing && (
+        <ItemFormDialog
+          item={editing}
+          onSave={(body) => updateItem(editing, body)}
+          onReload={() => reloadItem(editing)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {deleting && (
+        <DeleteItemDialog item={deleting} onConfirm={() => deleteItem(deleting)} onClose={() => setDeleting(null)} />
+      )}
     </>
   )
 }
