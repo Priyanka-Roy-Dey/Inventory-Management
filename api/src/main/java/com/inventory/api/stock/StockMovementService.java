@@ -1,0 +1,107 @@
+package com.inventory.api.stock;
+
+import com.inventory.api.item.Item;
+import com.inventory.api.item.ItemRepository;
+import com.inventory.api.item.ItemResponse;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+@Service
+public class StockMovementService {
+
+	// One statement, so concurrent movements are serialised by Postgres row locking and stock never goes below 0
+	// (design note §2.2).
+	private static final String APPLY_CHANGE = """
+			UPDATE items
+			SET quantity = quantity + :delta, version = version + 1, updated_at = now()
+			WHERE id = :id AND deleted_at IS NULL AND quantity + :delta >= 0
+			RETURNING quantity - :delta AS quantity_before, quantity AS quantity_after
+			""";
+
+	private final JdbcClient jdbc;
+
+	private final ItemRepository items;
+
+	private final StockMovementRepository movements;
+
+	public StockMovementService(JdbcClient jdbc, ItemRepository items, StockMovementRepository movements) {
+		this.jdbc = jdbc;
+		this.items = items;
+		this.movements = movements;
+	}
+
+	/**
+	 * Applies the change and records it in one transaction: either both happen or neither does.
+	 */
+	@Transactional
+	public MovementResult record(Long itemId, StockMovementRequest request, String username) {
+		int delta = deltaFor(request);
+		StockLevels levels = applyChange(itemId, delta).orElseThrow(() -> rejected(itemId));
+		StockMovement movement = movements.save(new StockMovement(itemId, request.type(), delta,
+				levels.quantityBefore(), levels.quantityAfter(), request.reason(), username));
+		Item item = items.findById(itemId).orElseThrow();
+		return new MovementResult(MovementResponse.from(movement), ItemResponse.from(item));
+	}
+
+	@Transactional(readOnly = true)
+	public List<MovementResponse> history(Long itemId) {
+		findActive(itemId);
+		return movements.findAllByItemIdOrderByCreatedAtDescIdDesc(itemId)
+			.stream()
+			.map(MovementResponse::from)
+			.toList();
+	}
+
+	private static int deltaFor(StockMovementRequest request) {
+		int quantity = request.quantity();
+		return switch (request.type()) {
+			case IN -> requirePositive(quantity);
+			case OUT -> -requirePositive(quantity);
+			case ADJUST -> {
+				if (quantity == 0) {
+					throw badRequest("quantity: must not be 0 for ADJUST");
+				}
+				if (request.reason() == null) {
+					throw badRequest("reason: is required for ADJUST");
+				}
+				yield quantity;
+			}
+		};
+	}
+
+	private static int requirePositive(int quantity) {
+		if (quantity < 1) {
+			throw badRequest("quantity: must be at least 1 for IN and OUT");
+		}
+		return quantity;
+	}
+
+	private Optional<StockLevels> applyChange(Long itemId, int delta) {
+		return jdbc.sql(APPLY_CHANGE).param("delta", delta).param("id", itemId).query(StockLevels.class).optional();
+	}
+
+	// No row was updated: either the item does not exist, or the change would take stock below zero.
+	private ResponseStatusException rejected(Long itemId) {
+		Item item = findActive(itemId);
+		return new ResponseStatusException(HttpStatus.CONFLICT,
+				"Not enough stock: only " + item.getQuantity() + " available");
+	}
+
+	private Item findActive(Long itemId) {
+		return items.findByIdAndDeletedAtIsNull(itemId)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
+	}
+
+	private static ResponseStatusException badRequest(String message) {
+		return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+	}
+
+	record StockLevels(int quantityBefore, int quantityAfter) {
+	}
+
+}
