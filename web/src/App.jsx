@@ -3,6 +3,7 @@ import { CAN_IMPORT, CAN_MANAGE_USERS } from './auth/roles'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
 import AlertsPage from './pages/AlertsPage'
+import ChangePasswordPage from './pages/ChangePasswordPage'
 import DashboardPage from './pages/DashboardPage'
 import ImportPage from './pages/ImportPage'
 import ItemsPage from './pages/ItemsPage'
@@ -15,6 +16,7 @@ function App() {
     <Routes>
       <Route path="login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
+        <Route path="change-password" element={<ChangePasswordPage />} />
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
           <Route path="items" element={<ItemsPage />} />

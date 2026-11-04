@@ -35,7 +35,7 @@ describe('createMockApiMiddleware', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('application/json')
-    expect((await response.json()).user).toEqual({ username: 'admin', role: 'ADMIN' })
+    expect((await response.json()).user).toEqual({ username: 'admin', role: 'ADMIN', mustChangePassword: false })
   })
 
   it('returns the handler error status', async () => {
