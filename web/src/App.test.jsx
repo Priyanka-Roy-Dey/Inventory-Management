@@ -1,9 +1,16 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
 import AuthProvider from './auth/AuthProvider'
+import { server } from './test/server'
+
+// The Items page loads items; routing tests only need it to render.
+beforeEach(() => {
+  server.use(http.get('/api/items', () => HttpResponse.json([])))
+})
 
 function signInAs(role, mustChangePassword = false) {
   const session = {

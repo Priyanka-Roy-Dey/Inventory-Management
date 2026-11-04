@@ -4,5 +4,6 @@ export const ROLE_LABELS = {
   VIEWER: 'Viewer',
 }
 
+export const CAN_EDIT_ITEMS = ['ADMIN', 'STAFF']
 export const CAN_IMPORT = ['ADMIN', 'STAFF']
 export const CAN_MANAGE_USERS = ['ADMIN']
