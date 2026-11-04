@@ -75,6 +75,13 @@ public class Item {
 		this.unitPrice = unitPrice;
 	}
 
+	/**
+	 * Hides the item everywhere but keeps the row, so its SKU stays reserved (A7).
+	 */
+	public void softDelete(Instant now) {
+		this.deletedAt = now;
+	}
+
 	public boolean isLowStock() {
 		return quantity <= reorderLevel;
 	}
@@ -117,6 +124,10 @@ public class Item {
 
 	public Instant getUpdatedAt() {
 		return updatedAt;
+	}
+
+	public Instant getDeletedAt() {
+		return deletedAt;
 	}
 
 }

@@ -26,7 +26,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 /**
  * Stateless security: every request outside {@link #PUBLIC_PATHS} needs a valid bearer token. User management
- * is Admin only; otherwise any role may read and only Staff and Admin may write. A user who must change their
+ * and deleting items are Admin only; otherwise any role may read and only Staff and Admin may write. A user who must change their
  * password gets no role, so they can only call {@code /api/auth/change-password}.
  */
 @Configuration
@@ -45,6 +45,7 @@ public class SecurityConfig {
 			.authorizeHttpRequests(requests -> requests.requestMatchers(PUBLIC_PATHS).permitAll()
 				.requestMatchers("/api/auth/change-password").authenticated()
 				.requestMatchers("/api/users", "/api/users/**").hasRole(Role.ADMIN.name())
+				.requestMatchers(HttpMethod.DELETE, "/api/items/**").hasRole(Role.ADMIN.name())
 				.requestMatchers(HttpMethod.GET, "/api/**")
 				.hasAnyRole(Role.ADMIN.name(), Role.STAFF.name(), Role.VIEWER.name())
 				.requestMatchers("/api/**").hasAnyRole(Role.STAFF.name(), Role.ADMIN.name())

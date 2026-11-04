@@ -624,6 +624,36 @@
               }
             }
           ]
+        },
+        {
+          "name": "Delete item (Admin only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "description": "Soft delete: the item disappears from reads, but its SKU stays reserved. Staff and Viewers get 403."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
