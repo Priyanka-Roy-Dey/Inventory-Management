@@ -15,6 +15,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
@@ -47,6 +48,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		}
 		if (ex instanceof HttpMessageNotReadableException) {
 			return "Malformed JSON request body";
+		}
+		if (ex instanceof ResponseStatusException withReason && withReason.getReason() != null) {
+			return withReason.getReason();
 		}
 		if (status.value() == HttpStatus.NOT_FOUND.value()) {
 			return "Resource not found";

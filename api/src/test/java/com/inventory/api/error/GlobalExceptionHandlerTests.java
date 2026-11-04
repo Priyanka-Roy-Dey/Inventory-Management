@@ -57,6 +57,13 @@ class GlobalExceptionHandlerTests {
 	}
 
 	@Test
+	void notFoundKeepsASpecificReason() throws Exception {
+		mockMvc.perform(get("/test/missing"))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.message").value("Item not found"));
+	}
+
+	@Test
 	void unsupportedMethodIsMethodNotAllowed() throws Exception {
 		mockMvc.perform(delete("/test/items"))
 			.andExpect(status().isMethodNotAllowed())
@@ -83,6 +90,11 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/test/conflict")
 		void conflict() {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "SKU already exists");
+		}
+
+		@GetMapping("/test/missing")
+		void missing() {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found");
 		}
 
 		@GetMapping("/test/boom")
