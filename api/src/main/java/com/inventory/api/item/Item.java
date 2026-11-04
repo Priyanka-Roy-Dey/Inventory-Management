@@ -65,6 +65,16 @@ public class Item {
 		this.unitPrice = unitPrice;
 	}
 
+	/**
+	 * Changes the editable details. SKU and quantity are not editable here (A33, §2.2).
+	 */
+	public void update(String name, String category, int reorderLevel, BigDecimal unitPrice) {
+		this.name = name;
+		this.category = category;
+		this.reorderLevel = reorderLevel;
+		this.unitPrice = unitPrice;
+	}
+
 	public boolean isLowStock() {
 		return quantity <= reorderLevel;
 	}
