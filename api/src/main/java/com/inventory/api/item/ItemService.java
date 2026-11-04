@@ -1,6 +1,7 @@
 package com.inventory.api.item;
 
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
@@ -15,8 +16,11 @@ public class ItemService {
 
 	private final ItemRepository items;
 
-	public ItemService(ItemRepository items) {
+	private final Clock clock;
+
+	public ItemService(ItemRepository items, Clock clock) {
 		this.items = items;
+		this.clock = clock;
 	}
 
 	public ItemResponse create(CreateItemRequest request) {
@@ -53,6 +57,11 @@ public class ItemService {
 		catch (ObjectOptimisticLockingFailureException ex) {
 			throw changedBySomeoneElse();
 		}
+	}
+
+	@Transactional
+	public void delete(Long id) {
+		findActive(id).softDelete(clock.instant());
 	}
 
 	public List<ItemResponse> list() {
