@@ -27,6 +27,10 @@
     {
       "key": "userId",
       "value": ""
+    },
+    {
+      "key": "itemId",
+      "value": ""
     }
   ],
   "item": [
@@ -455,6 +459,87 @@
                   "const body = pm.response.json();",
                   "pm.test('user must change password', () => pm.expect(body.user.mustChangePassword).to.eql(true));",
                   "pm.test('new temporary password', () => pm.expect(body.temporaryPassword).to.have.length.of.at.least(16));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Items",
+      "item": [
+        {
+          "name": "Create item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"PAP-A4\",\n  \"name\": \"A4 paper\",\n  \"category\": \"Stationery\",\n  \"quantity\": 40,\n  \"reorderLevel\": 10,\n  \"unitPrice\": 4.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Staff or Admin. Creating the same SKU again returns 409."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('SKU stored in uppercase', () => pm.expect(body.sku).to.eql(body.sku.toUpperCase()));",
+                  "pm.collectionVariables.set('itemId', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List items",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items"
+              ]
+            },
+            "description": "Any signed-in role."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a list', () => pm.expect(pm.response.json()).to.be.an('array'));"
                 ]
               }
             }
