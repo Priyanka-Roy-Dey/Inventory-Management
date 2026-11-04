@@ -5,8 +5,11 @@ import { describe, expect, it } from 'vitest'
 import App from './App'
 import AuthProvider from './auth/AuthProvider'
 
-function signInAs(role) {
-  const session = { accessToken: 'token-1', user: { username: `${role.toLowerCase()}-user`, role } }
+function signInAs(role, mustChangePassword = false) {
+  const session = {
+    accessToken: 'token-1',
+    user: { username: `${role.toLowerCase()}-user`, role, mustChangePassword },
+  }
   sessionStorage.setItem('inventory.session', JSON.stringify(session))
 }
 
@@ -106,5 +109,31 @@ describe('App access control', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
 
     expect(screen.getByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument()
+  })
+})
+
+describe('App forced password change', () => {
+  function renderFlaggedAt(path) {
+    signInAs('VIEWER', true)
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+  }
+
+  it.each(['/', '/items', '/users'])('sends a user who must change their password from %s to the form', (path) => {
+    renderFlaggedAt(path)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Set a new password' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+  })
+
+  it('lets other signed-in users open the form', () => {
+    renderAt('/change-password', 'STAFF')
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Set a new password' })).toBeInTheDocument()
   })
 })

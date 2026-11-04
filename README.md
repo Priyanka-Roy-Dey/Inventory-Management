@@ -60,7 +60,25 @@ Run the tests (Postgres is started by Testcontainers):
 
 ### Web (`web/`)
 
-_To be completed with the Vite proxy (INV-8 follow-up)._
+Start the API first, then:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` and sign in with the Admin from `INVENTORY_ADMIN_USERNAME` / `INVENTORY_ADMIN_PASSWORD`. Vite forwards `/api/*` to `http://localhost:8080`; set `VITE_API_URL` to use another address.
+
+To work on the UI without the API, run `npm run dev:mock`. It answers `/api/*` from fake data in `src/mocks/handlers.js` (users `admin/admin123`, `staff/staff123`, `viewer/viewer123`).
+
+Run the tests and checks:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
 
 ## Deploying
 
