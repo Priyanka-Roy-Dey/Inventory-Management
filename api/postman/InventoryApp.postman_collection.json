@@ -35,6 +35,14 @@
     {
       "key": "itemVersion",
       "value": "0"
+    },
+    {
+      "key": "uploadUrl",
+      "value": ""
+    },
+    {
+      "key": "imageKey",
+      "value": ""
     }
   ],
   "item": [
@@ -650,6 +658,129 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Item images",
+      "item": [
+        {
+          "name": "1. Request upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"image/png\",\n  \"size\": 12345\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/items/{{itemId}}/image/upload-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "{{itemId}}",
+                "image",
+                "upload-url"
+              ]
+            },
+            "description": "Set size to the file's size in bytes. Saves uploadUrl and imageKey."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('uploadUrl', pm.response.json().uploadUrl);",
+                  "pm.collectionVariables.set('imageKey', pm.response.json().key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Upload file to storage",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "image/png"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {}
+            },
+            "url": {
+              "raw": "{{uploadUrl}}"
+            },
+            "description": "Choose the image file in Body > binary. Goes straight to S3 (S3Mock locally), not to the API."
+          }
+        },
+        {
+          "name": "3. Stock in with the image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"IN\",\n  \"quantity\": 10,\n  \"reason\": \"Delivery\",\n  \"imageKey\": \"{{imageKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/items/{{itemId}}/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "{{itemId}}",
+                "movements"
+              ]
+            },
+            "description": "Records the stock and attaches the uploaded image to the item. Only IN movements may carry an image."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('item has an imageUrl', () => pm.expect(pm.response.json().item.imageUrl).to.be.a('string'));",
+                  "pm.collectionVariables.set('itemVersion', pm.response.json().item.version);"
                 ]
               }
             }

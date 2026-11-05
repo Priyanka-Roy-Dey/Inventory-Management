@@ -1,8 +1,9 @@
 package com.inventory.api.stock;
 
 import com.inventory.api.item.Item;
+import com.inventory.api.item.ItemImageService;
 import com.inventory.api.item.ItemRepository;
-import com.inventory.api.item.ItemResponse;
+import com.inventory.api.item.ItemResponses;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.http.HttpStatus;
@@ -29,23 +30,38 @@ public class StockMovementService {
 
 	private final StockMovementRepository movements;
 
-	public StockMovementService(JdbcClient jdbc, ItemRepository items, StockMovementRepository movements) {
+	private final ItemResponses responses;
+
+	private final ItemImageService images;
+
+	public StockMovementService(JdbcClient jdbc, ItemRepository items, StockMovementRepository movements,
+			ItemResponses responses, ItemImageService images) {
 		this.jdbc = jdbc;
 		this.items = items;
 		this.movements = movements;
+		this.responses = responses;
+		this.images = images;
 	}
 
 	/**
-	 * Applies the change and records it in one transaction: either both happen or neither does.
+	 * Applies the change, records it and attaches any image in one transaction: all of it happens or none does.
 	 */
 	@Transactional
 	public MovementResult record(Long itemId, StockMovementRequest request, String username) {
 		int delta = deltaFor(request);
+		// Check the image before touching stock, so a bad upload changes nothing.
+		if (request.imageKey() != null) {
+			images.checkUpload(itemId, request.imageKey());
+		}
 		StockLevels levels = applyChange(itemId, delta).orElseThrow(() -> rejected(itemId));
 		StockMovement movement = movements.save(new StockMovement(itemId, request.type(), delta,
 				levels.quantityBefore(), levels.quantityAfter(), request.reason(), username));
 		Item item = items.findById(itemId).orElseThrow();
-		return new MovementResult(MovementResponse.from(movement), ItemResponse.from(item));
+		if (request.imageKey() != null) {
+			images.attach(item, request.imageKey());
+			items.flush();
+		}
+		return new MovementResult(MovementResponse.from(movement), responses.of(item));
 	}
 
 	@Transactional(readOnly = true)
@@ -58,6 +74,9 @@ public class StockMovementService {
 	}
 
 	private static int deltaFor(StockMovementRequest request) {
+		if (request.imageKey() != null && request.type() != MovementType.IN) {
+			throw badRequest("imageKey: is only allowed for IN");
+		}
 		int quantity = request.quantity();
 		return switch (request.type()) {
 			case IN -> requirePositive(quantity);

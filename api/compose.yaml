@@ -9,3 +9,10 @@ services:
       - 'POSTGRES_PASSWORD=inventory'
     ports:
       - '5432'
+  # Local stand-in for S3 (item images). It accepts any credentials; AWS uses a real bucket.
+  s3:
+    image: 'adobe/s3mock:5.2.2'
+    environment:
+      - 'COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=inventory-images'
+    ports:
+      - '9090:9090'

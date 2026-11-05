@@ -16,10 +16,13 @@ public class ItemService {
 
 	private final ItemRepository items;
 
+	private final ItemResponses responses;
+
 	private final Clock clock;
 
-	public ItemService(ItemRepository items, Clock clock) {
+	public ItemService(ItemRepository items, ItemResponses responses, Clock clock) {
 		this.items = items;
+		this.responses = responses;
 		this.clock = clock;
 	}
 
@@ -27,7 +30,7 @@ public class ItemService {
 		Item item = new Item(request.sku(), request.name(), request.category(), request.quantity(),
 				request.reorderLevel(), request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
 		try {
-			return ItemResponse.from(items.saveAndFlush(item));
+			return responses.of(items.saveAndFlush(item));
 		}
 		catch (DataIntegrityViolationException ex) {
 			// Validation covers the other constraints, so this is the unique SKU (including deleted items).
@@ -36,7 +39,7 @@ public class ItemService {
 	}
 
 	public ItemResponse get(Long id) {
-		return ItemResponse.from(findActive(id));
+		return responses.of(findActive(id));
 	}
 
 	/**
@@ -52,7 +55,7 @@ public class ItemService {
 				request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
 		try {
 			// Another request may have saved between our read and this write; @Version catches that too.
-			return ItemResponse.from(items.saveAndFlush(item));
+			return responses.of(items.saveAndFlush(item));
 		}
 		catch (ObjectOptimisticLockingFailureException ex) {
 			throw changedBySomeoneElse();
@@ -65,7 +68,7 @@ public class ItemService {
 	}
 
 	public List<ItemResponse> list() {
-		return items.findAllByDeletedAtIsNull(Sort.by("sku")).stream().map(ItemResponse::from).toList();
+		return items.findAllByDeletedAtIsNull(Sort.by("sku")).stream().map(responses::of).toList();
 	}
 
 	private Item findActive(Long id) {

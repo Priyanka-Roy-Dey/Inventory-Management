@@ -46,7 +46,7 @@ export INVENTORY_ADMIN_PASSWORD='choose-a-strong-password'
 ./mvnw spring-boot:run
 ```
 
-Spring Boot starts Postgres from `compose.yaml`. The API runs on `http://localhost:8080`:
+Spring Boot starts Postgres and S3Mock (local S3 for item images, port 9090) from `compose.yaml`. The API runs on `http://localhost:8080`:
 
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - Health: `http://localhost:8080/actuator/health`
