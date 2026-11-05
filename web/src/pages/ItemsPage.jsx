@@ -1,5 +1,6 @@
 import {
   Alert,
+  Avatar,
   Box,
   Button,
   Chip,
@@ -29,6 +30,17 @@ function bySku(a, b) {
   return a.sku.localeCompare(b.sku)
 }
 
+// Images are added with stock (A36); here they are only shown.
+function ItemThumbnail({ item }) {
+  return item.imageUrl ? (
+    <Avatar variant="rounded" src={item.imageUrl} alt={item.sku} sx={{ width: 40, height: 40 }} />
+  ) : (
+    <Avatar variant="rounded" sx={{ width: 40, height: 40, bgcolor: 'grey.200', color: 'text.secondary' }}>
+      {item.sku.charAt(0)}
+    </Avatar>
+  )
+}
+
 function ItemsTable({ items, onStock, onEdit, onDelete }) {
   const hasActions = Boolean(onStock || onEdit || onDelete)
   return (
@@ -36,6 +48,7 @@ function ItemsTable({ items, onStock, onEdit, onDelete }) {
       <Table aria-label="Items" size="small">
         <TableHead>
           <TableRow>
+            <TableCell>Image</TableCell>
             <TableCell>SKU</TableCell>
             <TableCell>Name</TableCell>
             <TableCell>Category</TableCell>
@@ -49,6 +62,9 @@ function ItemsTable({ items, onStock, onEdit, onDelete }) {
         <TableBody>
           {items.map((item) => (
             <TableRow key={item.id}>
+              <TableCell>
+                <ItemThumbnail item={item} />
+              </TableCell>
               <TableCell>{item.sku}</TableCell>
               <TableCell>{item.name}</TableCell>
               <TableCell>{item.category}</TableCell>
@@ -141,6 +157,24 @@ function ItemsPage() {
     return result
   }
 
+  // Asks the API where to put the file, then uploads it straight to storage (A36). Returns the key to send with
+  // the stock-in.
+  async function uploadImage(item, file) {
+    const upload = await request(`/items/${item.id}/image/upload-url`, {
+      method: 'POST',
+      body: { contentType: file.type, size: file.size },
+    })
+    const response = await fetch(upload.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': upload.contentType },
+      body: file,
+    })
+    if (!response.ok) {
+      throw new Error(`Storage returned ${response.status}`)
+    }
+    return upload.key
+  }
+
   function loadHistory(item) {
     return request(`/items/${item.id}/movements`)
   }
@@ -200,6 +234,7 @@ function ItemsPage() {
         <StockDialog
           item={stocking}
           onRecord={(body) => recordMovement(stocking, body)}
+          onUploadImage={(file) => uploadImage(stocking, file)}
           loadHistory={() => loadHistory(stocking)}
           onClose={() => setStocking(null)}
         />
