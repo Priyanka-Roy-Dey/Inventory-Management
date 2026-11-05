@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AuthProvider from '../auth/AuthProvider'
 import { server } from '../test/server'
 import ItemsPage from './ItemsPage'
@@ -637,5 +637,163 @@ describe('ItemsPage Stock', () => {
     const dialog = await openStock()
 
     expect(await within(dialog).findByText('Could not load the history: Unexpected error')).toBeInTheDocument()
+  })
+})
+
+const IMAGE_URL = 'http://localhost:9090/inventory-images/items/1/abc.png?X-Amz-Signature=read'
+const UPLOAD_URL = 'http://localhost:9090/inventory-images/items/1/new.png?X-Amz-Signature=write'
+
+describe('ItemsPage images', () => {
+  it('shows a thumbnail for items that have an image', async () => {
+    serveItems([{ ...PAPER, imageUrl: IMAGE_URL }, CABLE])
+    renderPage('VIEWER')
+
+    expect(await screen.findByRole('img', { name: 'PAP-A4' })).toHaveAttribute('src', IMAGE_URL)
+    expect(within(rowFor('CBL-USB')).queryByRole('img')).not.toBeInTheDocument()
+  })
+})
+
+describe('ItemsPage Stock image', () => {
+  const png = () => new File(['png-bytes'], 'paper.png', { type: 'image/png' })
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  function serveHistory() {
+    server.use(http.get('/api/items/1/movements', () => HttpResponse.json([])))
+  }
+
+  async function openStock(user = userEvent) {
+    await user.click(await screen.findByRole('button', { name: 'Stock PAP-A4' }))
+    return screen.findByRole('dialog', { name: 'Stock: PAP-A4' })
+  }
+
+  it('shows the item image in the dialog', async () => {
+    serveItems([{ ...PAPER, imageUrl: IMAGE_URL }])
+    serveHistory()
+    renderPage()
+    const dialog = await openStock()
+
+    expect(within(dialog).getByRole('img', { name: 'PAP-A4' })).toHaveAttribute('src', IMAGE_URL)
+  })
+
+  it('offers an image only when adding stock', async () => {
+    serveItems([PAPER])
+    serveHistory()
+    renderPage()
+    const dialog = await openStock()
+
+    expect(within(dialog).getByLabelText('Image (optional)')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Out' }))
+    expect(within(dialog).queryByLabelText('Image (optional)')).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Adjust' }))
+    expect(within(dialog).queryByLabelText('Image (optional)')).not.toBeInTheDocument()
+  })
+
+  it('previews the chosen image and can drop it again', async () => {
+    serveItems([PAPER])
+    serveHistory()
+    renderPage()
+    const dialog = await openStock()
+
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+
+    expect(within(dialog).getByRole('img', { name: 'Preview of paper.png' })).toHaveAttribute('src', 'blob:preview')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove chosen image' }))
+    expect(within(dialog).queryByRole('img', { name: /Preview/ })).not.toBeInTheDocument()
+  })
+
+  it('rejects files that are not JPEG, PNG or WebP, or larger than 2 MB', async () => {
+    const user = userEvent.setup({ applyAccept: false })
+    serveItems([PAPER])
+    serveHistory()
+    renderPage()
+    const dialog = await openStock(user)
+    const input = within(dialog).getByLabelText('Image (optional)')
+
+    await user.upload(input, new File(['gif'], 'anim.gif', { type: 'image/gif' }))
+    expect(within(dialog).getByText('Choose a JPEG, PNG or WebP image')).toBeInTheDocument()
+
+    await user.upload(input, new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' }))
+    expect(within(dialog).getByText('The image must be 2 MB or smaller')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('img', { name: /Preview/ })).not.toBeInTheDocument()
+  })
+
+  it('uploads the image to storage, then records the stock with it', async () => {
+    const calls = []
+    serveItems([PAPER])
+    serveHistory()
+    server.use(
+      http.post('/api/items/1/image/upload-url', async ({ request }) => {
+        calls.push(['upload-url', await request.json()])
+        return HttpResponse.json({
+          uploadUrl: UPLOAD_URL,
+          key: 'items/1/new.png',
+          contentType: 'image/png',
+          expiresAt: '2026-11-05T10:10:00Z',
+        })
+      }),
+      http.put('http://localhost:9090/inventory-images/items/1/new.png', async ({ request }) => {
+        calls.push(['storage', request.headers.get('Content-Type'), await request.text()])
+        return new HttpResponse(null, { status: 200 })
+      }),
+      http.post('/api/items/1/movements', async ({ request }) => {
+        calls.push(['movement', await request.json()])
+        return HttpResponse.json(
+          {
+            movement: { ...NEWER, id: 30, type: 'IN', quantityChange: 10, quantityBefore: 40, quantityAfter: 50 },
+            item: { ...PAPER, quantity: 50, version: 2, imageUrl: IMAGE_URL },
+          },
+          { status: 201 },
+        )
+      }),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+    await userEvent.type(within(dialog).getByLabelText(/^Quantity/), '10')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Record' }))
+
+    expect(await within(dialog).findByText('Stock updated: 40 → 50')).toBeInTheDocument()
+    expect(calls).toEqual([
+      ['upload-url', { contentType: 'image/png', size: 9 }],
+      ['storage', 'image/png', 'png-bytes'],
+      ['movement', { type: 'IN', quantity: 10, reason: null, imageKey: 'items/1/new.png' }],
+    ])
+    expect(within(dialog).getByRole('img', { name: 'PAP-A4' })).toHaveAttribute('src', IMAGE_URL)
+    expect(within(dialog).queryByRole('img', { name: /Preview/ })).not.toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(within(rowFor('PAP-A4')).getByRole('img', { name: 'PAP-A4' })).toHaveAttribute('src', IMAGE_URL)
+  })
+
+  it('does not record the stock when the image upload fails', async () => {
+    let recorded = false
+    serveItems([PAPER])
+    serveHistory()
+    server.use(
+      http.post('/api/items/1/image/upload-url', () =>
+        HttpResponse.json({ uploadUrl: UPLOAD_URL, key: 'items/1/new.png', contentType: 'image/png' }),
+      ),
+      http.put('http://localhost:9090/inventory-images/items/1/new.png', () => new HttpResponse(null, { status: 500 })),
+      http.post('/api/items/1/movements', () => {
+        recorded = true
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+    await userEvent.type(within(dialog).getByLabelText(/^Quantity/), '10')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Record' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Could not upload the image. The stock was not changed.',
+    )
+    expect(recorded).toBe(false)
   })
 })
