@@ -251,6 +251,84 @@ class ItemImageTests {
 			.andExpect(jsonPath("$.message").value("Image does not belong to this item"));
 	}
 
+	private ResultActions requestNewItemUpload(String contentType, long size, Role as) throws Exception {
+		return mockMvc.perform(post("/api/items/image/upload-url").header(HttpHeaders.AUTHORIZATION, bearerFor(as))
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{ \"contentType\": \"%s\", \"size\": %d }".formatted(contentType, size)));
+	}
+
+	private String uploadForNewItem(byte[] bytes, long declaredSize) throws Exception {
+		String response = requestNewItemUpload("image/png", declaredSize, Role.STAFF).andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		HttpResponse<Void> put = http.send(HttpRequest.newBuilder(URI.create(JsonPath.read(response, "$.uploadUrl")))
+			.header("Content-Type", "image/png")
+			.PUT(HttpRequest.BodyPublishers.ofByteArray(bytes))
+			.build(), HttpResponse.BodyHandlers.discarding());
+		assertThat(put.statusCode()).isEqualTo(200);
+		return JsonPath.read(response, "$.key");
+	}
+
+	private ResultActions createItem(String sku, String imageKey) throws Exception {
+		return mockMvc.perform(post("/api/items").header(HttpHeaders.AUTHORIZATION, bearerFor(Role.STAFF))
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{ "sku": "%s", "name": "Pen", "category": "Stationery", "quantity": 5, "reorderLevel": 1,
+					  "unitPrice": 1.25, "imageKey": "%s" }
+					""".formatted(sku, imageKey)));
+	}
+
+	@Test
+	void givesAnUploadUrlForANewItem() throws Exception {
+		requestNewItemUpload("image/webp", 100, Role.STAFF).andExpect(status().isOk())
+			.andExpect(jsonPath("$.key").value(org.hamcrest.Matchers.matchesPattern("new-items/.+\\.webp")))
+			.andExpect(jsonPath("$.uploadUrl").isNotEmpty());
+		requestNewItemUpload("image/gif", 100, Role.STAFF).andExpect(status().isBadRequest());
+		requestNewItemUpload("image/png", 10, Role.VIEWER).andExpect(status().isForbidden());
+	}
+
+	@Test
+	void createsAnItemWithItsImage() throws Exception {
+		String key = uploadForNewItem(PNG, PNG.length);
+
+		String response = createItem("PEN-1", key).andExpect(status().isCreated())
+			.andExpect(jsonPath("$.imageUrl").isNotEmpty())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		Long id = ((Number) JsonPath.read(response, "$.id")).longValue();
+		assertThat(jdbc.queryForObject("SELECT image_key FROM items WHERE id = ?", String.class, id)).isEqualTo(key);
+		HttpResponse<byte[]> image = http.send(
+				HttpRequest.newBuilder(URI.create(JsonPath.read(response, "$.imageUrl"))).GET().build(),
+				HttpResponse.BodyHandlers.ofByteArray());
+		assertThat(image.body()).isEqualTo(PNG);
+	}
+
+	@Test
+	void doesNotCreateTheItemWhenItsImageIsBad() throws Exception {
+		String tooBig = uploadForNewItem(new byte[2 * 1024 * 1024 + 1], PNG.length);
+
+		createItem("PEN-2", tooBig).andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.message").value("Image is larger than 2 MB"));
+		createItem("PEN-3", "new-items/never-uploaded.png").andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.message").value("Upload not found. Upload the image first."));
+		createItem("PEN-4", "items/" + paper.getId() + "/not-for-new-items.png").andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.message").value("Image does not belong to this item"));
+
+		assertThat(stored(tooBig)).isFalse();
+		assertThat(items.count()).isEqualTo(1);
+	}
+
+	@Test
+	void anImageForANewItemCannotBeUsedForStock() throws Exception {
+		String key = uploadForNewItem(PNG, PNG.length);
+
+		stockIn(1, key, Role.STAFF).andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.message").value("Image does not belong to this item"));
+	}
+
 	@Test
 	void viewerCannotUploadImages() throws Exception {
 		requestUpload(paper.getId(), "image/png", 10, Role.VIEWER).andExpect(status().isForbidden());

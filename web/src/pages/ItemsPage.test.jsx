@@ -797,3 +797,109 @@ describe('ItemsPage Stock image', () => {
     expect(recorded).toBe(false)
   })
 })
+
+describe('ItemsPage Add item image', () => {
+  const NEW_UPLOAD_URL = 'http://localhost:9090/inventory-images/new-items/abc.png?X-Amz-Signature=write'
+  const png = () => new File(['png-bytes'], 'pen.png', { type: 'image/png' })
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  it('offers an image when adding an item but not when editing', async () => {
+    serveItems([PAPER])
+    renderPage()
+
+    let dialog = await openAddItem()
+    expect(within(dialog).getByLabelText('Image (optional)')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit PAP-A4' }))
+    dialog = await screen.findByRole('dialog', { name: 'Edit item' })
+    expect(within(dialog).queryByLabelText('Image (optional)')).not.toBeInTheDocument()
+  })
+
+  it('uploads the image, then creates the item with it', async () => {
+    const calls = []
+    serveItems([])
+    server.use(
+      http.post('/api/items/image/upload-url', async ({ request }) => {
+        calls.push(['upload-url', await request.json()])
+        return HttpResponse.json({ uploadUrl: NEW_UPLOAD_URL, key: 'new-items/abc.png', contentType: 'image/png' })
+      }),
+      http.put('http://localhost:9090/inventory-images/new-items/abc.png', async ({ request }) => {
+        calls.push(['storage', request.headers.get('Content-Type'), await request.text()])
+        return new HttpResponse(null, { status: 200 })
+      }),
+      http.post('/api/items', async ({ request }) => {
+        calls.push(['create', await request.json()])
+        return HttpResponse.json({ ...PAPER, imageUrl: IMAGE_URL }, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openAddItem()
+
+    await fillForm(dialog, VALID)
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+    expect(within(dialog).getByRole('img', { name: 'Preview of pen.png' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('img', { name: 'PAP-A4' })).toHaveAttribute('src', IMAGE_URL)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(calls).toEqual([
+      ['upload-url', { contentType: 'image/png', size: 9 }],
+      ['storage', 'image/png', 'png-bytes'],
+      [
+        'create',
+        {
+          sku: 'pap-a4',
+          name: 'A4 paper',
+          category: 'Stationery',
+          quantity: 40,
+          reorderLevel: 10,
+          unitPrice: 4.5,
+          imageKey: 'new-items/abc.png',
+        },
+      ],
+    ])
+  })
+
+  it('does not create the item when the image upload fails', async () => {
+    let created = false
+    serveItems([])
+    server.use(
+      http.post('/api/items/image/upload-url', () =>
+        HttpResponse.json({ uploadUrl: NEW_UPLOAD_URL, key: 'new-items/abc.png', contentType: 'image/png' }),
+      ),
+      http.put('http://localhost:9090/inventory-images/new-items/abc.png', () => new HttpResponse(null, { status: 500 })),
+      http.post('/api/items', () => {
+        created = true
+        return HttpResponse.json(PAPER, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openAddItem()
+
+    await fillForm(dialog, VALID)
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Could not upload the image. The item was not created.',
+    )
+    expect(created).toBe(false)
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('does not upload anything when the form is invalid', async () => {
+    serveItems([])
+    renderPage()
+    const dialog = await openAddItem()
+
+    await userEvent.upload(within(dialog).getByLabelText('Image (optional)'), png())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(within(dialog).getByText('Name is required')).toBeInTheDocument()
+  })
+})

@@ -16,13 +16,16 @@ public record CreateItemRequest(
 		@NotBlank @Size(max = 200) String name, @NotBlank @Size(max = 100) String category,
 		@NotNull @Min(0) Integer quantity, @NotNull @Min(0) Integer reorderLevel,
 		@NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2,
-				message = "must have at most 8 digits before and 2 after the decimal point") BigDecimal unitPrice) {
+				message = "must have at most 8 digits before and 2 after the decimal point") BigDecimal unitPrice,
+		@Size(max = 200) String imageKey) {
 
 	// Normalised before validation: SKUs are compared trimmed and in uppercase (A32).
 	public CreateItemRequest {
 		sku = sku == null ? null : sku.trim().toUpperCase(Locale.ROOT);
 		name = name == null ? null : name.trim();
 		category = category == null ? null : category.trim();
+		// An image already uploaded for the new item (A36), if any.
+		imageKey = imageKey == null || imageKey.isBlank() ? null : imageKey.trim();
 	}
 
 }

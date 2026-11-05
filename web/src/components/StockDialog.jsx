@@ -25,6 +25,8 @@ import {
 } from '@mui/material'
 import { useEffect, useEffectEvent, useState } from 'react'
 import { ApiError } from '../api/client'
+import ImagePicker from './ImagePicker'
+import useImageChoice from './useImageChoice'
 
 const TYPES = [
   { value: 'IN', label: 'In', helperText: 'Units received' },
@@ -33,22 +35,9 @@ const TYPES = [
 ]
 const TYPE_LABELS = Object.fromEntries(TYPES.map(({ value, label }) => [value, label]))
 
-// The same limits as the API (A34, A36).
+// The same limits as the API (A34).
 const MAX_QUANTITY = 1_000_000
 const MAX_REASON = 500
-const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
-const MAX_IMAGE_BYTES = 2 * 1024 * 1024
-
-function imageProblem(file) {
-  if (!IMAGE_TYPES.includes(file.type)) {
-    return 'Choose a JPEG, PNG or WebP image'
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    return 'The image must be 2 MB or smaller'
-  }
-  return null
-}
-
 function validate({ type, quantity, reason }) {
   const errors = {}
   const value = quantity.trim()
@@ -157,40 +146,6 @@ function History({ history }) {
   )
 }
 
-// Lets the user add an image when adding stock. Only checks the file; uploading happens on Record.
-function ImagePicker({ image, error, onChoose, onRemove }) {
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mt: 1 }}>
-      <Button component="label" variant="outlined" size="small">
-        {image ? 'Choose another image' : 'Choose image'}
-        <input
-          hidden
-          type="file"
-          accept={IMAGE_TYPES.join(',')}
-          aria-label="Image (optional)"
-          onChange={onChoose}
-        />
-      </Button>
-      {image && (
-        <>
-          <Box
-            component="img"
-            src={image.previewUrl}
-            alt={`Preview of ${image.file.name}`}
-            sx={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 1 }}
-          />
-          <Button size="small" aria-label="Remove chosen image" onClick={onRemove}>
-            Remove
-          </Button>
-        </>
-      )}
-      <Typography variant="body2" color={error ? 'error' : 'text.secondary'}>
-        {error ?? 'Optional image for the item: JPEG, PNG or WebP, up to 2 MB'}
-      </Typography>
-    </Box>
-  )
-}
-
 /**
  * Records stock movements for `item` and shows its history. `onRecord` sends a movement and returns
  * `{ movement, item }`; `loadHistory` returns the movements, newest first; `onUploadImage` uploads a file and
@@ -203,8 +158,8 @@ function StockDialog({ item, onRecord, loadHistory, onUploadImage, onClose }) {
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [history, setHistory] = useState({ status: 'loading', movements: [] })
-  const [image, setImage] = useState(null)
-  const [imageError, setImageError] = useState(null)
+  const imageChoice = useImageChoice()
+  const { image } = imageChoice
   const [uploading, setUploading] = useState(false)
 
   const fetchHistory = useEffectEvent(() => loadHistory())
@@ -220,38 +175,12 @@ function StockDialog({ item, onRecord, loadHistory, onUploadImage, onClose }) {
     }
   }, [])
 
-  // Frees the preview's memory when it is replaced or the dialog closes.
-  useEffect(() => {
-    return () => {
-      if (image) {
-        URL.revokeObjectURL(image.previewUrl)
-      }
-    }
-  }, [image])
-
   function handleChange(event) {
     setValues({ ...values, [event.target.name]: event.target.value })
     // Only stock coming in can bring an image.
     if (event.target.name === 'type' && event.target.value !== 'IN') {
-      clearImage()
+      imageChoice.clear()
     }
-  }
-
-  function handleImage(event) {
-    const file = event.target.files[0]
-    // Clear the input so choosing the same file again still triggers a change.
-    event.target.value = ''
-    if (!file) {
-      return
-    }
-    const problem = imageProblem(file)
-    setImageError(problem)
-    setImage(problem ? null : { file, previewUrl: URL.createObjectURL(file) })
-  }
-
-  function clearImage() {
-    setImage(null)
-    setImageError(null)
   }
 
   async function handleSubmit(event) {
@@ -286,7 +215,7 @@ function StockDialog({ item, onRecord, loadHistory, onUploadImage, onClose }) {
       setSuccess(`Stock updated: ${movement.quantityBefore} → ${movement.quantityAfter}`)
       setHistory({ status: 'ready', movements: [movement, ...history.movements] })
       setValues({ ...values, quantity: '', reason: '' })
-      clearImage()
+      imageChoice.clear()
     } catch (error) {
       setServerError(error.message)
     }
@@ -363,7 +292,7 @@ function StockDialog({ item, onRecord, loadHistory, onUploadImage, onClose }) {
             </Button>
           </Box>
           {values.type === 'IN' && (
-            <ImagePicker image={image} error={imageError} onChoose={handleImage} onRemove={clearImage} />
+            <ImagePicker choice={imageChoice} hint="Optional image for the item: JPEG, PNG or WebP, up to 2 MB" />
           )}
           {uploading && (
             <Typography variant="body2" sx={{ mt: 1 }}>

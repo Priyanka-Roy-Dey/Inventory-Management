@@ -18,17 +18,27 @@ public class ItemService {
 
 	private final ItemResponses responses;
 
+	private final ItemImageService images;
+
 	private final Clock clock;
 
-	public ItemService(ItemRepository items, ItemResponses responses, Clock clock) {
+	public ItemService(ItemRepository items, ItemResponses responses, ItemImageService images, Clock clock) {
 		this.items = items;
 		this.responses = responses;
+		this.images = images;
 		this.clock = clock;
 	}
 
 	public ItemResponse create(CreateItemRequest request) {
+		// Check the image first, so a bad upload creates nothing.
+		if (request.imageKey() != null) {
+			images.checkNewItemUpload(request.imageKey());
+		}
 		Item item = new Item(request.sku(), request.name(), request.category(), request.quantity(),
 				request.reorderLevel(), request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
+		if (request.imageKey() != null) {
+			item.attachImage(request.imageKey());
+		}
 		try {
 			return responses.of(items.saveAndFlush(item));
 		}

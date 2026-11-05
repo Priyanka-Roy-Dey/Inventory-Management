@@ -785,6 +785,53 @@
               }
             }
           ]
+        },
+        {
+          "name": "New item: request upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"image/png\",\n  \"size\": 12345\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/items/image/upload-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "image",
+                "upload-url"
+              ]
+            },
+            "description": "For an item that doesn't exist yet. Then run '2. Upload file to storage', then Items / Create item with \"imageKey\": \"{{imageKey}}\" in the body."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('uploadUrl', pm.response.json().uploadUrl);",
+                  "pm.collectionVariables.set('imageKey', pm.response.json().key);"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
