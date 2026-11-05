@@ -8,11 +8,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Staff or Admin (see {@code SecurityConfig}). The upload is attached by a stock-in that names its key, and read
- * through {@code imageUrl} on the item.
+ * Staff or Admin (see {@code SecurityConfig}). The upload is attached by the request that names its key (a stock-in
+ * for an existing item, or creating a new item), and read through {@code imageUrl} on the item.
  */
 @RestController
-@RequestMapping("/api/items/{itemId}/image")
+@RequestMapping("/api/items")
 public class ItemImageController {
 
 	private final ItemImageService images;
@@ -21,9 +21,14 @@ public class ItemImageController {
 		this.images = images;
 	}
 
-	@PostMapping("/upload-url")
+	@PostMapping("/{itemId}/image/upload-url")
 	public ImageUploadResponse requestUpload(@PathVariable Long itemId, @Valid @RequestBody ImageUploadRequest request) {
 		return images.requestUpload(itemId, request);
+	}
+
+	@PostMapping("/image/upload-url")
+	public ImageUploadResponse requestNewItemUpload(@Valid @RequestBody ImageUploadRequest request) {
+		return images.requestNewItemUpload(request);
 	}
 
 }

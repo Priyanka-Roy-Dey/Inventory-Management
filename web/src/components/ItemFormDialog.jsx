@@ -1,5 +1,8 @@
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from '@mui/material'
 import { useState } from 'react'
+import { ApiError } from '../api/client'
+import ImagePicker from './ImagePicker'
+import useImageChoice from './useImageChoice'
 
 // The same rules as the API, so most mistakes are caught before a request is sent.
 const SKU_PATTERN = /^[A-Za-z0-9._-]+$/
@@ -93,15 +96,17 @@ const FIELDS = [
 
 /**
  * Adds a new item, or edits `item` when given. `onSave` receives the request body and throws an error with a
- * message (and `status`) on failure. When editing, `onReload` returns the latest copy of the item.
+ * message (and `status`) on failure. When editing, `onReload` returns the latest copy of the item. When adding,
+ * `onUploadImage` uploads the chosen image and returns its key (A36).
  */
-function ItemFormDialog({ item, onSave, onReload, onClose }) {
+function ItemFormDialog({ item, onSave, onReload, onUploadImage, onClose }) {
   const editing = Boolean(item)
   const [values, setValues] = useState(editing ? fromItem(item) : EMPTY)
   const [version, setVersion] = useState(item?.version)
   const [errors, setErrors] = useState({})
   const [serverError, setServerError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const imageChoice = useImageChoice()
 
   function handleChange(event) {
     setValues({ ...values, [event.target.name]: event.target.value })
@@ -117,8 +122,21 @@ function ItemFormDialog({ item, onSave, onReload, onClose }) {
     }
 
     setSubmitting(true)
+    const body = editing ? toUpdateBody(values, version) : toCreateBody(values)
+    if (!editing && imageChoice.image) {
+      try {
+        body.imageKey = await onUploadImage(imageChoice.image.file)
+      } catch (error) {
+        // The API explains its own refusals; a storage failure only says it failed.
+        const message =
+          error instanceof ApiError ? error.message : 'Could not upload the image. The item was not created.'
+        setServerError({ message, changedElsewhere: false })
+        setSubmitting(false)
+        return
+      }
+    }
     try {
-      await onSave(editing ? toUpdateBody(values, version) : toCreateBody(values))
+      await onSave(body)
     } catch (error) {
       setServerError({ message: error.message, changedElsewhere: editing && error.status === 409 })
       setSubmitting(false)
@@ -179,6 +197,7 @@ function ItemFormDialog({ item, onSave, onReload, onClose }) {
               />
             )
           })}
+          {!editing && <ImagePicker choice={imageChoice} hint="Optional: JPEG, PNG or WebP, up to 2 MB" />}
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Cancel</Button>

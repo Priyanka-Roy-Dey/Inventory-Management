@@ -158,9 +158,9 @@ function ItemsPage() {
   }
 
   // Asks the API where to put the file, then uploads it straight to storage (A36). Returns the key to send with
-  // the stock-in.
-  async function uploadImage(item, file) {
-    const upload = await request(`/items/${item.id}/image/upload-url`, {
+  // the request that attaches it: a stock-in, or creating the item.
+  async function uploadImage(uploadUrlPath, file) {
+    const upload = await request(uploadUrlPath, {
       method: 'POST',
       body: { contentType: file.type, size: file.size },
     })
@@ -173,6 +173,10 @@ function ItemsPage() {
       throw new Error(`Storage returned ${response.status}`)
     }
     return upload.key
+  }
+
+  function uploadStockImage(item, file) {
+    return uploadImage(`/items/${item.id}/image/upload-url`, file)
   }
 
   function loadHistory(item) {
@@ -221,7 +225,13 @@ function ItemsPage() {
           onDelete={canDelete ? setDeleting : undefined}
         />
       )}
-      {adding && <ItemFormDialog onSave={createItem} onClose={() => setAdding(false)} />}
+      {adding && (
+        <ItemFormDialog
+          onSave={createItem}
+          onUploadImage={(file) => uploadImage('/items/image/upload-url', file)}
+          onClose={() => setAdding(false)}
+        />
+      )}
       {editing && (
         <ItemFormDialog
           item={editing}
@@ -234,7 +244,7 @@ function ItemsPage() {
         <StockDialog
           item={stocking}
           onRecord={(body) => recordMovement(stocking, body)}
-          onUploadImage={(file) => uploadImage(stocking, file)}
+          onUploadImage={(file) => uploadStockImage(stocking, file)}
           loadHistory={() => loadHistory(stocking)}
           onClose={() => setStocking(null)}
         />

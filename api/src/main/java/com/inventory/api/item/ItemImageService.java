@@ -12,8 +12,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Images arrive with stock (A36): the API hands out a presigned URL, the browser uploads to storage, and a stock-in
- * that names the upload checks the stored file and attaches it to the item.
+ * Images arrive with stock (A36): the API hands out a presigned URL, the browser uploads to storage, and the
+ * request that names the upload (a stock-in, or creating the item) checks the stored file and attaches it.
  */
 @Service
 public class ItemImageService {
@@ -22,6 +22,9 @@ public class ItemImageService {
 			"image/webp", "webp");
 
 	private static final String ALLOWED_TYPES = "image/jpeg, image/png or image/webp";
+
+	// Uploads for an item that does not exist yet, so has no id to put in the key.
+	private static final String NEW_ITEM_PREFIX = "new-items/";
 
 	private final ItemRepository items;
 
@@ -34,6 +37,14 @@ public class ItemImageService {
 
 	public ImageUploadResponse requestUpload(Long itemId, ImageUploadRequest request) {
 		findActive(itemId);
+		return presign(keyPrefix(itemId), request);
+	}
+
+	public ImageUploadResponse requestNewItemUpload(ImageUploadRequest request) {
+		return presign(NEW_ITEM_PREFIX, request);
+	}
+
+	private ImageUploadResponse presign(String prefix, ImageUploadRequest request) {
 		String extension = EXTENSIONS.get(request.contentType());
 		if (extension == null) {
 			throw badRequest("contentType: must be " + ALLOWED_TYPES);
@@ -41,7 +52,7 @@ public class ItemImageService {
 		if (request.size() > storage.maxSizeInBytes()) {
 			throw badRequest("size: must be at most " + maxSizeText());
 		}
-		String key = keyPrefix(itemId) + UUID.randomUUID() + "." + extension;
+		String key = prefix + UUID.randomUUID() + "." + extension;
 		PresignedUpload upload = storage.presignUpload(key, request.contentType(), request.size());
 		return new ImageUploadResponse(upload.url(), key, request.contentType(), upload.expiresAt());
 	}
@@ -50,7 +61,15 @@ public class ItemImageService {
 	 * Checks the file the browser uploaded for this item. A file that breaks the rules is deleted.
 	 */
 	public void checkUpload(Long itemId, String key) {
-		if (!key.startsWith(keyPrefix(itemId))) {
+		checkUploadUnder(keyPrefix(itemId), key);
+	}
+
+	public void checkNewItemUpload(String key) {
+		checkUploadUnder(NEW_ITEM_PREFIX, key);
+	}
+
+	private void checkUploadUnder(String prefix, String key) {
+		if (!key.startsWith(prefix)) {
 			throw badRequest("Image does not belong to this item");
 		}
 		StoredObject stored = storage.find(key)
