@@ -7,9 +7,22 @@ import App from './App'
 import AuthProvider from './auth/AuthProvider'
 import { server } from './test/server'
 
-// The Items page loads items; routing tests only need it to render.
+// The Dashboard and Items pages load data; routing tests only need them to render.
 beforeEach(() => {
-  server.use(http.get('/api/items', () => HttpResponse.json([])))
+  server.use(
+    http.get('/api/items', () => HttpResponse.json([])),
+    http.get('/api/dashboard', () =>
+      HttpResponse.json({
+        totalItems: 0,
+        lowStockCount: 0,
+        totalUnits: 0,
+        stockValue: 0,
+        movementsLast24Hours: 0,
+        lowStockItems: [],
+        recentMovements: [],
+      }),
+    ),
+  )
 })
 
 function signInAs(role, mustChangePassword = false) {
