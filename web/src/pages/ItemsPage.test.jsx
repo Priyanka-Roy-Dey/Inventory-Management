@@ -415,3 +415,227 @@ describe('ItemsPage Delete item', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Item not found')
   })
 })
+
+const LOW_PAPER = { ...PAPER, quantity: 5, lowStock: true, version: 1 }
+const OLDER = {
+  id: 11,
+  type: 'IN',
+  quantityChange: 40,
+  quantityBefore: 0,
+  quantityAfter: 40,
+  reason: 'First delivery',
+  createdBy: 'admin',
+  createdAt: '2026-11-01T09:00:00Z',
+}
+const NEWER = {
+  id: 12,
+  type: 'ADJUST',
+  quantityChange: -2,
+  quantityBefore: 40,
+  quantityAfter: 38,
+  reason: 'Damaged',
+  createdBy: 'staff',
+  createdAt: '2026-11-02T09:00:00Z',
+}
+
+describe('ItemsPage Stock', () => {
+  function serveHistory(movements) {
+    server.use(http.get('/api/items/1/movements', () => HttpResponse.json(movements)))
+  }
+
+  async function openStock() {
+    await userEvent.click(await screen.findByRole('button', { name: 'Stock PAP-A4' }))
+    return screen.findByRole('dialog', { name: 'Stock: PAP-A4' })
+  }
+
+  async function record(dialog, { type, quantity, reason }) {
+    if (type) {
+      await userEvent.click(within(dialog).getByRole('radio', { name: type }))
+    }
+    const quantityField = within(dialog).getByLabelText(/^Quantity/)
+    await userEvent.clear(quantityField)
+    if (quantity) {
+      await userEvent.type(quantityField, quantity)
+    }
+    if (reason) {
+      await userEvent.type(within(dialog).getByLabelText(/^Reason/), reason)
+    }
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Record' }))
+  }
+
+  it('is offered to Staff and Admin but not to a Viewer', async () => {
+    serveItems([PAPER])
+    renderPage('VIEWER')
+
+    await screen.findByText('PAP-A4')
+    expect(screen.queryByRole('button', { name: 'Stock PAP-A4' })).not.toBeInTheDocument()
+  })
+
+  it('shows the current quantity and the history, newest first', async () => {
+    serveItems([PAPER])
+    serveHistory([NEWER, OLDER])
+    renderPage('STAFF')
+    const dialog = await openStock()
+
+    expect(card(dialog, 'In stock')).toHaveTextContent('40')
+    const history = await within(dialog).findByRole('table', { name: 'Stock history' })
+    const rows = within(history).getAllByRole('row')
+    expect(rows).toHaveLength(3)
+    expect(within(rows[1]).getByText('Adjust')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('-2')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('40 → 38')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('Damaged')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('staff')).toBeInTheDocument()
+    expect(within(rows[2]).getByText('+40')).toBeInTheDocument()
+  })
+
+  function card(dialog, title) {
+    return within(dialog).getByRole('group', { name: title })
+  }
+
+  it('summarises the stock in cards', async () => {
+    const issued = { ...NEWER, id: 15, type: 'OUT', quantityChange: -7, quantityBefore: 38, quantityAfter: 31 }
+    const received = { ...OLDER, id: 16, quantityChange: 9, quantityBefore: 31, quantityAfter: 40 }
+    serveItems([PAPER])
+    serveHistory([received, issued, NEWER, OLDER])
+    renderPage()
+    const dialog = await openStock()
+    await within(dialog).findByRole('table', { name: 'Stock history' })
+
+    expect(card(dialog, 'In stock')).toHaveTextContent('40')
+    expect(card(dialog, 'In stock')).toHaveTextContent('OK')
+    expect(card(dialog, 'Reorder level')).toHaveTextContent('10')
+    expect(card(dialog, 'Received')).toHaveTextContent('+49')
+    expect(card(dialog, 'Issued')).toHaveTextContent('-7')
+    expect(card(dialog, 'Adjusted')).toHaveTextContent('-2')
+  })
+
+  it('marks the In stock card when stock is low', async () => {
+    serveItems([LOW_PAPER])
+    serveHistory([])
+    renderPage()
+    const dialog = await openStock()
+
+    expect(card(dialog, 'In stock')).toHaveTextContent('5')
+    expect(card(dialog, 'In stock')).toHaveTextContent('Low stock')
+    expect(await within(dialog).findByText('No movements yet.')).toBeInTheDocument()
+    expect(card(dialog, 'Received')).toHaveTextContent('0')
+  })
+
+  it('says when there is no history yet', async () => {
+    serveItems([PAPER])
+    serveHistory([])
+    renderPage()
+    const dialog = await openStock()
+
+    expect(await within(dialog).findByText('No movements yet.')).toBeInTheDocument()
+  })
+
+  it('records a movement and updates the dialog and the row', async () => {
+    let body
+    const movement = { ...NEWER, id: 13, type: 'OUT', quantityChange: -35, quantityBefore: 40, quantityAfter: 5 }
+    serveItems([PAPER])
+    serveHistory([OLDER])
+    server.use(
+      http.post('/api/items/1/movements', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ movement, item: LOW_PAPER }, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openStock()
+    await within(dialog).findByRole('table', { name: 'Stock history' })
+
+    await record(dialog, { type: 'Out', quantity: '35', reason: 'Order 12' })
+
+    expect(await within(dialog).findByText('Stock updated: 40 → 5')).toBeInTheDocument()
+    expect(card(dialog, 'In stock')).toHaveTextContent('5')
+    expect(card(dialog, 'In stock')).toHaveTextContent('Low stock')
+    expect(card(dialog, 'Issued')).toHaveTextContent('-35')
+    expect(body).toEqual({ type: 'OUT', quantity: 35, reason: 'Order 12' })
+    const rows = within(within(dialog).getByRole('table', { name: 'Stock history' })).getAllByRole('row')
+    expect(within(rows[1]).getByText('-35')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText(/^Quantity/)).toHaveValue('')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    const itemRow = rowFor('PAP-A4')
+    expect(within(itemRow).getByText('5')).toBeInTheDocument()
+    expect(within(itemRow).getByText('Low stock')).toBeInTheDocument()
+  })
+
+  it('sends a signed change for an adjustment', async () => {
+    let body
+    serveItems([PAPER])
+    serveHistory([])
+    server.use(
+      http.post('/api/items/1/movements', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json(
+          {
+            movement: { ...NEWER, id: 14, quantityChange: -3, quantityBefore: 40, quantityAfter: 37 },
+            item: { ...PAPER, quantity: 37, version: 1 },
+          },
+          { status: 201 },
+        )
+      }),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    await record(dialog, { type: 'Adjust', quantity: '-3', reason: 'Stocktake' })
+
+    expect(await within(dialog).findByText('Stock updated: 40 → 37')).toBeInTheDocument()
+    expect(body).toEqual({ type: 'ADJUST', quantity: -3, reason: 'Stocktake' })
+  })
+
+  it('blocks invalid movements without calling the API', async () => {
+    let posted = false
+    serveItems([PAPER])
+    serveHistory([])
+    server.use(
+      http.post('/api/items/1/movements', () => {
+        posted = true
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    await record(dialog, { type: 'Out', quantity: '0' })
+    expect(within(dialog).getByText('Enter a whole number of 1 or more')).toBeInTheDocument()
+
+    await record(dialog, { type: 'Adjust', quantity: '0' })
+    expect(within(dialog).getByText('Enter a change such as 5 or -3, not 0')).toBeInTheDocument()
+    expect(within(dialog).getByText('A reason is required for an adjustment')).toBeInTheDocument()
+
+    expect(posted).toBe(false)
+  })
+
+  it('shows the server message when there is not enough stock', async () => {
+    serveItems([PAPER])
+    serveHistory([])
+    server.use(
+      http.post('/api/items/1/movements', () =>
+        HttpResponse.json({ message: 'Not enough stock: only 40 available' }, { status: 409 }),
+      ),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    await record(dialog, { type: 'Out', quantity: '99' })
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Not enough stock: only 40 available')
+    expect(card(dialog, 'In stock')).toHaveTextContent('40')
+  })
+
+  it('shows an error when the history cannot be loaded', async () => {
+    serveItems([PAPER])
+    server.use(
+      http.get('/api/items/1/movements', () => HttpResponse.json({ message: 'Unexpected error' }, { status: 500 })),
+    )
+    renderPage()
+    const dialog = await openStock()
+
+    expect(await within(dialog).findByText('Could not load the history: Unexpected error')).toBeInTheDocument()
+  })
+})

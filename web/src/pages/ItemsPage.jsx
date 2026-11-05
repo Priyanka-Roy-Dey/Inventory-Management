@@ -18,6 +18,7 @@ import { CAN_DELETE_ITEMS, CAN_EDIT_ITEMS } from '../auth/roles'
 import useAuth from '../auth/useAuth'
 import DeleteItemDialog from '../components/DeleteItemDialog'
 import ItemFormDialog from '../components/ItemFormDialog'
+import StockDialog from '../components/StockDialog'
 import PageTitle from '../components/PageTitle'
 
 function formatPrice(price) {
@@ -28,8 +29,8 @@ function bySku(a, b) {
   return a.sku.localeCompare(b.sku)
 }
 
-function ItemsTable({ items, onEdit, onDelete }) {
-  const hasActions = Boolean(onEdit || onDelete)
+function ItemsTable({ items, onStock, onEdit, onDelete }) {
+  const hasActions = Boolean(onStock || onEdit || onDelete)
   return (
     <TableContainer component={Paper}>
       <Table aria-label="Items" size="small">
@@ -57,6 +58,11 @@ function ItemsTable({ items, onEdit, onDelete }) {
               <TableCell>{item.lowStock && <Chip label="Low stock" color="warning" size="small" />}</TableCell>
               {hasActions && (
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  {onStock && (
+                    <Button size="small" aria-label={`Stock ${item.sku}`} onClick={() => onStock(item)}>
+                      Stock
+                    </Button>
+                  )}
                   {onEdit && (
                     <Button size="small" aria-label={`Edit ${item.sku}`} onClick={() => onEdit(item)}>
                       Edit
@@ -90,6 +96,7 @@ function ItemsPage() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [stocking, setStocking] = useState(null)
   const canEdit = CAN_EDIT_ITEMS.includes(user.role)
   const canDelete = CAN_DELETE_ITEMS.includes(user.role)
 
@@ -122,6 +129,20 @@ function ItemsPage() {
     const updated = await request(`/items/${item.id}`, { method: 'PUT', body })
     setState({ status: 'ready', items: state.items.map((each) => (each.id === updated.id ? updated : each)) })
     setEditing(null)
+  }
+
+  async function recordMovement(item, body) {
+    const result = await request(`/items/${item.id}/movements`, { method: 'POST', body })
+    setState({
+      status: 'ready',
+      items: state.items.map((each) => (each.id === result.item.id ? result.item : each)),
+    })
+    setStocking(result.item)
+    return result
+  }
+
+  function loadHistory(item) {
+    return request(`/items/${item.id}/movements`)
   }
 
   function reloadItem(item) {
@@ -161,6 +182,7 @@ function ItemsPage() {
       {state.status === 'ready' && state.items.length > 0 && (
         <ItemsTable
           items={state.items}
+          onStock={canEdit ? setStocking : undefined}
           onEdit={canEdit ? setEditing : undefined}
           onDelete={canDelete ? setDeleting : undefined}
         />
@@ -172,6 +194,14 @@ function ItemsPage() {
           onSave={(body) => updateItem(editing, body)}
           onReload={() => reloadItem(editing)}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {stocking && (
+        <StockDialog
+          item={stocking}
+          onRecord={(body) => recordMovement(stocking, body)}
+          loadHistory={() => loadHistory(stocking)}
+          onClose={() => setStocking(null)}
         />
       )}
       {deleting && (
