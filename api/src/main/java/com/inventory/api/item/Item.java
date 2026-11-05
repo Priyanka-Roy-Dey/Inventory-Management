@@ -53,6 +53,9 @@ public class Item {
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
+	@Column(name = "image_key", length = 200)
+	private String imageKey;
+
 	protected Item() {
 	}
 
@@ -80,6 +83,14 @@ public class Item {
 	 */
 	public void softDelete(Instant now) {
 		this.deletedAt = now;
+	}
+
+	public void attachImage(String key) {
+		this.imageKey = key;
+	}
+
+	public void removeImage() {
+		this.imageKey = null;
 	}
 
 	public boolean isLowStock() {
@@ -128,6 +139,10 @@ public class Item {
 
 	public Instant getDeletedAt() {
 		return deletedAt;
+	}
+
+	public String getImageKey() {
+		return imageKey;
 	}
 
 }

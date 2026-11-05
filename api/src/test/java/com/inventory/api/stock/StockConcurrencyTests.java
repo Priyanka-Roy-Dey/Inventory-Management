@@ -86,7 +86,7 @@ class StockConcurrencyTests {
 		Item item = itemWith(10);
 
 		List<HttpStatus> statuses = runAtOnce(() -> stock.record(item.getId(),
-				new StockMovementRequest(MovementType.OUT, 1, null), "staff"));
+				new StockMovementRequest(MovementType.OUT, 1, null, null), "staff"));
 
 		assertThat(statuses).filteredOn(HttpStatus.CREATED::equals).hasSize(10);
 		assertThat(statuses).filteredOn(HttpStatus.CONFLICT::equals).hasSize(10);
@@ -99,7 +99,7 @@ class StockConcurrencyTests {
 		Item item = itemWith(0);
 
 		List<HttpStatus> statuses = runAtOnce(() -> stock.record(item.getId(),
-				new StockMovementRequest(MovementType.IN, 5, null), "staff"));
+				new StockMovementRequest(MovementType.IN, 5, null, null), "staff"));
 
 		assertThat(statuses).containsOnly(HttpStatus.CREATED);
 		assertThat(items.findById(item.getId()).orElseThrow().getQuantity()).isEqualTo(THREADS * 5);
