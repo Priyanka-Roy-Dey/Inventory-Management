@@ -12,6 +12,14 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.js',
+      // `npm run test:coverage` writes coverage/lcov.info for the quality gate (INV-7).
+      coverage: {
+        provider: 'v8',
+        // Paths from the repository root (web/src/...), where the SonarCloud scan runs.
+        reporter: ['text-summary', ['lcov', { projectRoot: '..' }]],
+        include: ['src/**/*.{js,jsx}'],
+        exclude: ['src/**/*.test.{js,jsx}', 'src/test/**', 'src/main.jsx'],
+      },
     },
   }
 })

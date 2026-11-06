@@ -37,8 +37,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npm test
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Keep coverage for SonarCloud
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-coverage
+          path: web/coverage/lcov.info
+          retention-days: 3
 
       - name: Build
         run: npm run build
@@ -64,3 +71,58 @@ jobs:
       # Runs the unit tests and the Testcontainers tests (the runner has Docker), then packages the jar.
       - name: Test and build
         run: ./mvnw -B verify
+
+      # Compiled classes and the JaCoCo report, for the SonarCloud job.
+      - name: Keep coverage for SonarCloud
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-coverage
+          path: |
+            api/target/classes
+            api/target/test-classes
+            api/target/site/jacoco/jacoco.xml
+          retention-days: 3
+
+  sonarcloud:
+    name: SonarCloud - quality gate
+    needs: [web, api]
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      # Skipped until the repository has a SONAR_TOKEN secret, so CI stays green before SonarCloud is set up.
+      - name: Check for the SonarCloud token
+        if: env.SONAR_TOKEN == ''
+        run: echo "::notice::SONAR_TOKEN is not set; skipping the SonarCloud analysis."
+
+      - name: Check out code
+        if: env.SONAR_TOKEN != ''
+        uses: actions/checkout@v5
+        with:
+          # Full history, so SonarCloud can tell which lines are new in this pull request.
+          fetch-depth: 0
+
+      - name: Get web coverage
+        if: env.SONAR_TOKEN != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: web-coverage
+          path: web/coverage
+
+      - name: Get API classes and coverage
+        if: env.SONAR_TOKEN != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: api-coverage
+          path: api/target
+
+      - name: Analyse and check the quality gate
+        if: env.SONAR_TOKEN != ''
+        # Third-party action pinned to an exact commit (v8.4.1), so the tag cannot be moved under us.
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Wait for the result, so this check fails when the quality gate fails.
+          args: -Dsonar.qualitygate.wait=true
+
