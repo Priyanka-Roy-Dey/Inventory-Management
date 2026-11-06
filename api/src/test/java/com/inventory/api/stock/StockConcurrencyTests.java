@@ -39,14 +39,22 @@ class StockConcurrencyTests {
 	@Autowired
 	private StockMovementRepository movements;
 
+	@Autowired
+	private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
 	@AfterEach
 	void deleteAll() {
+		jdbc.update("DELETE FROM outbox_events");
 		movements.deleteAll();
 		items.deleteAll();
 	}
 
 	private Item itemWith(int quantity) {
-		return items.saveAndFlush(new Item("CON-1", "Contended item", "Test", quantity, 0, BigDecimal.ONE));
+		return itemWith(quantity, 0);
+	}
+
+	private Item itemWith(int quantity, int reorderLevel) {
+		return items.saveAndFlush(new Item("CON-1", "Contended item", "Test", quantity, reorderLevel, BigDecimal.ONE));
 	}
 
 	/**
@@ -108,6 +116,20 @@ class StockConcurrencyTests {
 				.map(n -> n * 5)
 				.boxed()
 				.toList());
+	}
+
+	@Test
+	void parallelStockOutsCrossTheReorderLevelExactlyOnce() throws Exception {
+		Item item = itemWith(10, 3);
+
+		runAtOnce(() -> stock.record(item.getId(), new StockMovementRequest(MovementType.OUT, 1, null, null), "staff"));
+
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE aggregate_id = ?", Long.class,
+				item.getId()))
+			.isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT payload ->> 'quantity' FROM outbox_events WHERE aggregate_id = ?",
+				String.class, item.getId()))
+			.isEqualTo("3");
 	}
 
 }
