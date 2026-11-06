@@ -13,4 +13,7 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
 	@Query("select distinct i.category from Item i where i.deletedAt is null order by i.category")
 	List<String> findActiveCategories();
 
+	@Query("select distinct a from Item i join i.attributes a where i.deletedAt is null")
+	List<ItemAttribute> findActiveAttributes();
+
 }

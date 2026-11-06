@@ -1,7 +1,12 @@
 package com.inventory.api.item;
 
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -13,7 +18,8 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * The item list's search, filters, sort and page (INV-11). Every part is optional; deleted items are never listed.
  */
-public record ItemQuery(String search, String category, Boolean lowStock, String sort, Integer page, Integer size) {
+public record ItemQuery(String search, String category, Boolean lowStock, String sort, Integer page, Integer size,
+		BigDecimal minPrice, BigDecimal maxPrice, List<String> attributes, String pincode) {
 
 	static final int DEFAULT_SIZE = 20;
 
@@ -39,6 +45,23 @@ public record ItemQuery(String search, String category, Boolean lowStock, String
 		if (Boolean.TRUE.equals(lowStock)) {
 			spec = spec.and((root, query, cb) -> cb.le(root.get("quantity"), root.<Integer>get("reorderLevel")));
 		}
+		checkPriceRange();
+		if (minPrice != null) {
+			spec = spec.and((root, query, cb) -> cb.ge(root.get("unitPrice"), minPrice));
+		}
+		if (maxPrice != null) {
+			spec = spec.and((root, query, cb) -> cb.le(root.get("unitPrice"), maxPrice));
+		}
+		if (StringUtils.hasText(pincode)) {
+			String wanted = pincode.trim();
+			if (!ItemDetails.PINCODE.matcher(wanted).matches()) {
+				throw badRequest("pincode: must be a 6-digit pincode");
+			}
+			spec = spec.and((root, query, cb) -> cb.isMember(wanted, root.<Set<String>>get("deliveryPincodes")));
+		}
+		for (String attribute : attributes == null ? List.<String>of() : attributes) {
+			spec = spec.and(hasAttribute(attribute));
+		}
 		return spec;
 	}
 
@@ -52,6 +75,34 @@ public record ItemQuery(String search, String category, Boolean lowStock, String
 			throw badRequest("size: must be between 1 and " + MAX_SIZE);
 		}
 		return PageRequest.of(pageNumber, pageSize, sortOrder());
+	}
+
+	private void checkPriceRange() {
+		if ((minPrice != null && minPrice.signum() < 0) || (maxPrice != null && maxPrice.signum() < 0)) {
+			throw badRequest((minPrice != null && minPrice.signum() < 0 ? "minPrice" : "maxPrice") + ": must be 0 or more");
+		}
+		if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+			throw badRequest("minPrice: must not be more than maxPrice");
+		}
+	}
+
+	// "name:value", both compared ignoring case. A subquery, so an item with many attributes is listed once.
+	private static Specification<Item> hasAttribute(String filter) {
+		int colon = filter == null ? -1 : filter.indexOf(':');
+		String name = colon < 0 ? "" : filter.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+		String value = colon < 0 ? "" : filter.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
+		if (name.isEmpty() || value.isEmpty()) {
+			throw badRequest("attribute: use name:value, for example Colour:Blue");
+		}
+		return (root, query, cb) -> {
+			Subquery<Long> matching = query.subquery(Long.class);
+			Root<Item> item = matching.from(Item.class);
+			Join<Item, ItemAttribute> attribute = item.join("attributes");
+			matching.select(item.get("id"))
+				.where(cb.equal(item, root), cb.equal(cb.lower(attribute.get("name")), name),
+						cb.equal(cb.lower(attribute.get("value")), value));
+			return cb.exists(matching);
+		};
 	}
 
 	// "field" or "field,asc|desc". SKU breaks ties, so pages never overlap or skip items.

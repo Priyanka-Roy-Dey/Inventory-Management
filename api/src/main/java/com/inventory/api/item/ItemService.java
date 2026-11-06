@@ -5,6 +5,10 @@ import com.inventory.api.outbox.LowStockOutbox.Cause;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -46,6 +50,7 @@ public class ItemService {
 		}
 		Item item = new Item(request.sku(), request.name(), request.category(), request.quantity(),
 				request.reorderLevel(), request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
+		item.replaceDetails(ItemDetails.attributes(request.attributes()), ItemDetails.pincodes(request.deliveryPincodes()));
 		if (request.imageKey() != null) {
 			item.attachImage(request.imageKey());
 		}
@@ -62,6 +67,7 @@ public class ItemService {
 		}
 	}
 
+	@Transactional(readOnly = true)
 	public ItemResponse get(Long id) {
 		return responses.of(findActive(id));
 	}
@@ -78,6 +84,11 @@ public class ItemService {
 		boolean wasLow = item.isLowStock();
 		item.update(request.name(), request.category(), request.reorderLevel(),
 				request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
+		item.replaceDetails(
+				request.attributes() == null ? List.copyOf(item.getAttributes())
+						: ItemDetails.attributes(request.attributes()),
+				request.deliveryPincodes() == null ? Set.copyOf(item.getDeliveryPincodes())
+						: ItemDetails.pincodes(request.deliveryPincodes()));
 		try {
 			// Another request may have saved between our read and this write; @Version catches that too.
 			Item saved = items.saveAndFlush(item);
@@ -101,6 +112,26 @@ public class ItemService {
 		return items.findActiveCategories();
 	}
 
+	/**
+	 * Attribute names in use with their values, grouped ignoring case; the first spelling (in sort order) is shown.
+	 */
+	public List<AttributeOptions> attributeOptions() {
+		Map<String, String> names = new TreeMap<>();
+		Map<String, Map<String, String>> values = new TreeMap<>();
+		for (ItemAttribute attribute : items.findActiveAttributes()) {
+			String nameKey = attribute.name().toLowerCase(Locale.ROOT);
+			names.merge(nameKey, attribute.name(), (a, b) -> a.compareTo(b) <= 0 ? a : b);
+			values.computeIfAbsent(nameKey, key -> new TreeMap<>())
+				.merge(attribute.value().toLowerCase(Locale.ROOT), attribute.value(), (a, b) -> a.compareTo(b) <= 0 ? a : b);
+		}
+		return names.entrySet()
+			.stream()
+			.map(entry -> new AttributeOptions(entry.getValue(), List.copyOf(values.get(entry.getKey()).values())))
+			.toList();
+	}
+
+	// Read-only transaction: item responses read the lazily loaded attributes and pincodes.
+	@Transactional(readOnly = true)
 	public ItemPage search(ItemQuery query) {
 		Page<Item> page = items.findAll(query.specification(), query.pageable());
 		return new ItemPage(page.getContent().stream().map(responses::of).toList(), page.getNumber(), page.getSize(),

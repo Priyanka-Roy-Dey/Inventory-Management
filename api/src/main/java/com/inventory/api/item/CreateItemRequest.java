@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Locale;
 
 public record CreateItemRequest(
@@ -17,7 +18,7 @@ public record CreateItemRequest(
 		@NotNull @Min(0) Integer quantity, @NotNull @Min(0) Integer reorderLevel,
 		@NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2,
 				message = "must have at most 8 digits before and 2 after the decimal point") BigDecimal unitPrice,
-		@Size(max = 200) String imageKey) {
+		@Size(max = 200) String imageKey, List<AttributeRequest> attributes, List<String> deliveryPincodes) {
 
 	// Normalised before validation: SKUs are compared trimmed and in uppercase (A32).
 	public CreateItemRequest {
