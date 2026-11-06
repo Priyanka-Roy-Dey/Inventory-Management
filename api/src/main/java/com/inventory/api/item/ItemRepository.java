@@ -10,6 +10,9 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
 
 	Optional<Item> findByIdAndDeletedAtIsNull(Long id);
 
+	// Deleted items too: their SKU stays reserved, and an import restores them (A7).
+	Optional<Item> findBySku(String sku);
+
 	@Query("select distinct i.category from Item i where i.deletedAt is null order by i.category")
 	List<String> findActiveCategories();
 

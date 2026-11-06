@@ -124,6 +124,20 @@ public class Item {
 		this.imageKey = null;
 	}
 
+	/**
+	 * Undoes a soft delete; a CSV row with the SKU of a deleted item restores it (A7).
+	 */
+	public void restore() {
+		this.deletedAt = null;
+	}
+
+	/**
+	 * Sets the stock level from a CSV import. The caller must record the matching stock movement (A33).
+	 */
+	public void setQuantityFromImport(int newQuantity) {
+		this.quantity = newQuantity;
+	}
+
 	public boolean isLowStock() {
 		return quantity <= reorderLevel;
 	}
