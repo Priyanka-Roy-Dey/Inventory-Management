@@ -118,7 +118,8 @@ jobs:
 
       - name: Analyse and check the quality gate
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v8
+        # Third-party action pinned to an exact commit (v8.4.1), so the tag cannot be moved under us.
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
