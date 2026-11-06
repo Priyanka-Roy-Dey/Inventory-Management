@@ -10,7 +10,8 @@ import { server } from './test/server'
 // The Dashboard and Items pages load data; routing tests only need them to render.
 beforeEach(() => {
   server.use(
-    http.get('/api/items', () => HttpResponse.json([])),
+    http.get('/api/items', () => HttpResponse.json({ items: [], page: 0, size: 20, totalItems: 0, totalPages: 0 })),
+    http.get('/api/items/categories', () => HttpResponse.json([])),
     http.get('/api/dashboard', () =>
       HttpResponse.json({
         totalItems: 0,

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,9 +34,22 @@ public class ItemController {
 		return itemService.create(request);
 	}
 
+	/**
+	 * Search, filters, sort and page are all optional (INV-11). Example:
+	 * {@code ?search=pap&category=Stationery&lowStock=true&sort=quantity,desc&page=0&size=20}.
+	 */
 	@GetMapping
-	public List<ItemResponse> list() {
-		return itemService.list();
+	public ItemPage list(@RequestParam(required = false) String search,
+			@RequestParam(required = false) String category, @RequestParam(required = false) Boolean lowStock,
+			@RequestParam(required = false) String sort, @RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size) {
+		return itemService.search(new ItemQuery(search, category, lowStock, sort, page, size));
+	}
+
+	// For the category filter on the Items page.
+	@GetMapping("/categories")
+	public List<String> categories() {
+		return itemService.categories();
 	}
 
 	@GetMapping("/{id}")

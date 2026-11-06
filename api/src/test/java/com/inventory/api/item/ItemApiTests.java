@@ -144,7 +144,8 @@ class ItemApiTests {
 	void listIsEmptyAtFirst() throws Exception {
 		mockMvc.perform(get("/api/items").header(HttpHeaders.AUTHORIZATION, bearerFor(Role.VIEWER)))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.length()").value(0));
+			.andExpect(jsonPath("$.items.length()").value(0))
+			.andExpect(jsonPath("$.totalItems").value(0));
 	}
 
 	@ParameterizedTest
@@ -155,9 +156,9 @@ class ItemApiTests {
 
 		mockMvc.perform(get("/api/items").header(HttpHeaders.AUTHORIZATION, bearerFor(role)))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.length()").value(2))
-			.andExpect(jsonPath("$[0].sku").value("PAP-A4"))
-			.andExpect(jsonPath("$[1].sku").value("ZZZ-9"));
+			.andExpect(jsonPath("$.items.length()").value(2))
+			.andExpect(jsonPath("$.items[0].sku").value("PAP-A4"))
+			.andExpect(jsonPath("$.items[1].sku").value("ZZZ-9"));
 	}
 
 	@Test
