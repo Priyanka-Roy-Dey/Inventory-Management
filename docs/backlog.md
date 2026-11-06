@@ -54,6 +54,7 @@ One ticket ≈ one PR. Branch: `feature/INV-<n>-short-description`. Commits: `IN
 | INV-31 | README, architecture diagram, design note, lessons learned | Committed |
 | INV-32 | Demo rehearsal + clean-up (stop RDS, ECS to 0, check budget) | Done |
 | INV-33 | Item images added with stock: presigned upload to S3 (S3Mock locally) from the add-stock form, attached by the `IN` movement, `imageUrl` on items, shown on the Items page | Stock-in with image tested against S3Mock; bad images change nothing; Items page shows the image |
+| INV-34 | React Users page (Admin): list with role and status, create user, reset password, one-time temporary password with copy | Component tests |
 
 ## Stretch (only if ahead)
 
