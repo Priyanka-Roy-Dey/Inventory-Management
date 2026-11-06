@@ -14,6 +14,7 @@ beforeEach(() => {
     http.get('/api/items/categories', () => HttpResponse.json([])),
     http.get('/api/items/attributes', () => HttpResponse.json([])),
     http.get('/api/users', () => HttpResponse.json([])),
+    http.get('/api/alerts', () => HttpResponse.json({ alerts: [], page: 0, size: 20, totalItems: 0, totalPages: 0 })),
     http.get('/api/dashboard', () =>
       HttpResponse.json({
         totalItems: 0,
