@@ -85,7 +85,7 @@ class ItemDeleteTests {
 		String bearer = bearerFor(Role.STAFF);
 
 		mockMvc.perform(get("/api/items").header(HttpHeaders.AUTHORIZATION, bearer))
-			.andExpect(jsonPath("$.length()").value(0));
+			.andExpect(jsonPath("$.items.length()").value(0));
 		mockMvc.perform(get("/api/items/{id}", paper.getId()).header(HttpHeaders.AUTHORIZATION, bearer))
 			.andExpect(status().isNotFound());
 		mockMvc

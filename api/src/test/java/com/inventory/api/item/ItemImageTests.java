@@ -164,7 +164,7 @@ class ItemImageTests {
 		assertThat(image.statusCode()).isEqualTo(200);
 		assertThat(image.body()).isEqualTo(PNG);
 		mockMvc.perform(get("/api/items").header(HttpHeaders.AUTHORIZATION, bearerFor(Role.VIEWER)))
-			.andExpect(jsonPath("$[0].imageUrl").isNotEmpty());
+			.andExpect(jsonPath("$.items[0].imageUrl").isNotEmpty());
 	}
 
 	@Test

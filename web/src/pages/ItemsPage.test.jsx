@@ -48,8 +48,15 @@ function renderPage(role = 'STAFF') {
   )
 }
 
+function pageOf(items, { page = 0, size = 20, totalItems = items.length } = {}) {
+  return { items, page, size, totalItems, totalPages: Math.ceil(totalItems / size) }
+}
+
 function serveItems(items) {
-  server.use(http.get('/api/items', () => HttpResponse.json(items)))
+  server.use(
+    http.get('/api/items', () => HttpResponse.json(pageOf(items))),
+    http.get('/api/items/categories', () => HttpResponse.json([...new Set(items.map((item) => item.category))].sort())),
+  )
 }
 
 describe('ItemsPage list', () => {
@@ -93,7 +100,7 @@ describe('ItemsPage list', () => {
         calls += 1
         return calls === 1
           ? HttpResponse.json({ message: 'Unexpected error' }, { status: 500 })
-          : HttpResponse.json([PAPER])
+          : HttpResponse.json(pageOf([PAPER]))
       }),
     )
     renderPage()
@@ -901,5 +908,100 @@ describe('ItemsPage Add item image', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
 
     expect(within(dialog).getByText('Name is required')).toBeInTheDocument()
+  })
+})
+
+describe('ItemsPage search, filters, sorting and pages', () => {
+  // Answers like the API and remembers every query it was asked.
+  function serveSearch({ items = [PAPER, CABLE], totalItems, categories = ['Cables', 'Stationery'] } = {}) {
+    const queries = []
+    server.use(
+      http.get('/api/items', ({ request }) => {
+        const params = new URL(request.url).searchParams
+        queries.push(Object.fromEntries(params))
+        return HttpResponse.json(
+          pageOf(items, { page: Number(params.get('page') ?? 0), size: 20, totalItems: totalItems ?? items.length }),
+        )
+      }),
+      http.get('/api/items/categories', () => HttpResponse.json(categories)),
+    )
+    return queries
+  }
+
+  it('asks for the first page sorted by SKU', async () => {
+    const queries = serveSearch()
+    renderPage()
+
+    await screen.findByText('PAP-A4')
+    expect(queries.at(-1)).toEqual({ page: '0', size: '20', sort: 'sku,asc' })
+  })
+
+  it('searches SKU and name as the user types', async () => {
+    const queries = serveSearch()
+    renderPage()
+    await screen.findByText('PAP-A4')
+
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search SKU or name' }), 'pap')
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ search: 'pap', page: '0' }))
+    expect(queries.filter((query) => query.search)).toHaveLength(1)
+  })
+
+  it('filters by category', async () => {
+    const queries = serveSearch()
+    renderPage()
+    await screen.findByText('PAP-A4')
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Category' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Cables' }))
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ category: 'Cables' }))
+  })
+
+  it('shows only low-stock items when asked', async () => {
+    const queries = serveSearch()
+    renderPage()
+    await screen.findByText('PAP-A4')
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Low stock only' }))
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ lowStock: 'true' }))
+  })
+
+  it('sorts by a column, then reverses it', async () => {
+    const queries = serveSearch()
+    renderPage()
+    await screen.findByText('PAP-A4')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Quantity' }))
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ sort: 'quantity,asc' }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Quantity' }))
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ sort: 'quantity,desc' }))
+  })
+
+  it('moves between pages and starts again on page 1 when a filter changes', async () => {
+    const queries = serveSearch({ totalItems: 45 })
+    renderPage()
+    await screen.findByText('PAP-A4')
+    expect(screen.getByText('1–20 of 45')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Go to next page' }))
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ page: '1' }))
+    expect(await screen.findByText('21–40 of 45')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Low stock only' }))
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ lowStock: 'true', page: '0' }))
+  })
+
+  it('says when nothing matches', async () => {
+    serveSearch()
+    renderPage()
+    await screen.findByText('PAP-A4')
+    server.use(http.get('/api/items', () => HttpResponse.json(pageOf([]))))
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Low stock only' }))
+
+    expect(await screen.findByText('No items match your search.')).toBeInTheDocument()
   })
 })

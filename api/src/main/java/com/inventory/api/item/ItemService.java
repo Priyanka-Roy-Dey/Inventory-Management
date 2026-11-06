@@ -6,7 +6,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Page;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -97,8 +97,14 @@ public class ItemService {
 		findActive(id).softDelete(clock.instant());
 	}
 
-	public List<ItemResponse> list() {
-		return items.findAllByDeletedAtIsNull(Sort.by("sku")).stream().map(responses::of).toList();
+	public List<String> categories() {
+		return items.findActiveCategories();
+	}
+
+	public ItemPage search(ItemQuery query) {
+		Page<Item> page = items.findAll(query.specification(), query.pageable());
+		return new ItemPage(page.getContent().stream().map(responses::of).toList(), page.getNumber(), page.getSize(),
+				page.getTotalElements(), page.getTotalPages());
 	}
 
 	private Item findActive(Long id) {

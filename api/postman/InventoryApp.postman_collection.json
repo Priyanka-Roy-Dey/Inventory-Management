@@ -533,16 +533,43 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/items",
+              "raw": "{{baseUrl}}/api/items?search=pap&lowStock=false&sort=sku,asc&page=0&size=20",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "items"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "pap"
+                },
+                {
+                  "key": "category",
+                  "value": "Stationery",
+                  "disabled": true
+                },
+                {
+                  "key": "lowStock",
+                  "value": "false"
+                },
+                {
+                  "key": "sort",
+                  "value": "sku,asc"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
               ]
             },
-            "description": "Any signed-in role."
+            "description": "Any role. All query parameters are optional; untick the ones you don't want."
           },
           "event": [
             {
@@ -551,7 +578,36 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('is a list', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                  "pm.test('is a page', () => pm.expect(pm.response.json()).to.have.keys('items','page','size','totalItems','totalPages'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/items/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "categories"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
                 ]
               }
             }
