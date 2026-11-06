@@ -1,5 +1,7 @@
 package com.inventory.api.item;
 
+import com.inventory.api.outbox.LowStockOutbox;
+import com.inventory.api.outbox.LowStockOutbox.Cause;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.util.List;
@@ -20,15 +22,23 @@ public class ItemService {
 
 	private final ItemImageService images;
 
+	private final LowStockOutbox outbox;
+
 	private final Clock clock;
 
-	public ItemService(ItemRepository items, ItemResponses responses, ItemImageService images, Clock clock) {
+	public ItemService(ItemRepository items, ItemResponses responses, ItemImageService images, LowStockOutbox outbox,
+			Clock clock) {
 		this.items = items;
 		this.responses = responses;
 		this.images = images;
+		this.outbox = outbox;
 		this.clock = clock;
 	}
 
+	/**
+	 * An item created already at or below its reorder level alerts once (A13), in the same transaction.
+	 */
+	@Transactional
 	public ItemResponse create(CreateItemRequest request) {
 		// Check the image first, so a bad upload creates nothing.
 		if (request.imageKey() != null) {
@@ -40,7 +50,11 @@ public class ItemService {
 			item.attachImage(request.imageKey());
 		}
 		try {
-			return responses.of(items.saveAndFlush(item));
+			Item saved = items.saveAndFlush(item);
+			if (saved.isLowStock()) {
+				outbox.record(saved.getId(), Cause.CREATED);
+			}
+			return responses.of(saved);
 		}
 		catch (DataIntegrityViolationException ex) {
 			// Validation covers the other constraints, so this is the unique SKU (including deleted items).
@@ -61,11 +75,17 @@ public class ItemService {
 		if (item.getVersion() != request.version()) {
 			throw changedBySomeoneElse();
 		}
+		boolean wasLow = item.isLowStock();
 		item.update(request.name(), request.category(), request.reorderLevel(),
 				request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
 		try {
 			// Another request may have saved between our read and this write; @Version catches that too.
-			return responses.of(items.saveAndFlush(item));
+			Item saved = items.saveAndFlush(item);
+			// Quantity cannot change here, so only a raised reorder level can make the item low (A14).
+			if (!wasLow && saved.isLowStock()) {
+				outbox.record(saved.getId(), Cause.REORDER_LEVEL_RAISED);
+			}
+			return responses.of(saved);
 		}
 		catch (ObjectOptimisticLockingFailureException ex) {
 			throw changedBySomeoneElse();

@@ -4,6 +4,8 @@ import com.inventory.api.item.Item;
 import com.inventory.api.item.ItemImageService;
 import com.inventory.api.item.ItemRepository;
 import com.inventory.api.item.ItemResponses;
+import com.inventory.api.outbox.LowStockOutbox;
+import com.inventory.api.outbox.LowStockOutbox.Cause;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.http.HttpStatus;
@@ -21,7 +23,7 @@ public class StockMovementService {
 			UPDATE items
 			SET quantity = quantity + :delta, version = version + 1, updated_at = now()
 			WHERE id = :id AND deleted_at IS NULL AND quantity + :delta >= 0
-			RETURNING quantity - :delta AS quantity_before, quantity AS quantity_after
+			RETURNING quantity - :delta AS quantity_before, quantity AS quantity_after, reorder_level
 			""";
 
 	private final JdbcClient jdbc;
@@ -34,17 +36,21 @@ public class StockMovementService {
 
 	private final ItemImageService images;
 
+	private final LowStockOutbox outbox;
+
 	public StockMovementService(JdbcClient jdbc, ItemRepository items, StockMovementRepository movements,
-			ItemResponses responses, ItemImageService images) {
+			ItemResponses responses, ItemImageService images, LowStockOutbox outbox) {
 		this.jdbc = jdbc;
 		this.items = items;
 		this.movements = movements;
 		this.responses = responses;
 		this.images = images;
+		this.outbox = outbox;
 	}
 
 	/**
-	 * Applies the change, records it and attaches any image in one transaction: all of it happens or none does.
+	 * Applies the change, records it, attaches any image and writes any low-stock event in one transaction: all of
+	 * it happens or none does.
 	 */
 	@Transactional
 	public MovementResult record(Long itemId, StockMovementRequest request, String username) {
@@ -56,6 +62,10 @@ public class StockMovementService {
 		StockLevels levels = applyChange(itemId, delta).orElseThrow(() -> rejected(itemId));
 		StockMovement movement = movements.save(new StockMovement(itemId, request.type(), delta,
 				levels.quantityBefore(), levels.quantityAfter(), request.reason(), username));
+		// The before/after values come from the row lock, so concurrent movements see exactly one crossing.
+		if (LowStockOutbox.crossed(levels.quantityBefore(), levels.quantityAfter(), levels.reorderLevel())) {
+			outbox.record(itemId, Cause.STOCK_MOVEMENT);
+		}
 		Item item = items.findById(itemId).orElseThrow();
 		if (request.imageKey() != null) {
 			images.attach(item, request.imageKey());
@@ -120,7 +130,7 @@ public class StockMovementService {
 		return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
 	}
 
-	record StockLevels(int quantityBefore, int quantityAfter) {
+	record StockLevels(int quantityBefore, int quantityAfter, int reorderLevel) {
 	}
 
 }
