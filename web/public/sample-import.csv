@@ -1,0 +1,7 @@
+sku,name,category,quantity,reorder_level,unit_price
+PAP-A4,A4 paper,Stationery,5,10,4.50
+CBL-USB,USB cable,Cables,3,5,3.99
+PEN-001,Blue pen,Stationery,100,20,1.20
+PEN-001,"Blue pen, box of 10",Stationery,120,20,11.00
+BAD-1,Broken quantity,Stationery,lots,5,1.00
+,Missing SKU,Stationery,1,1,1.00

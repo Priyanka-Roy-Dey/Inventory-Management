@@ -24,6 +24,24 @@ describe('apiRequest', () => {
     expect(received).toEqual({ contentType: 'application/json', body: { sku: 'A-1' } })
   })
 
+  it('sends form data as multipart, without a JSON content type', async () => {
+    let received
+    server.use(
+      http.post('/api/items/import', async ({ request }) => {
+        const form = await request.formData()
+        received = { contentType: request.headers.get('Content-Type'), file: await form.get('file').text() }
+        return HttpResponse.json({ imported: 1 })
+      }),
+    )
+    const form = new FormData()
+    form.append('file', new File(['sku\n'], 'items.csv', { type: 'text/csv' }))
+
+    await apiRequest('/items/import', { method: 'POST', body: form })
+
+    expect(received.contentType).toMatch(/^multipart\/form-data; boundary=/)
+    expect(received.file).toBe('sku\n')
+  })
+
   it('sends the bearer token when given', async () => {
     let authorization
     server.use(

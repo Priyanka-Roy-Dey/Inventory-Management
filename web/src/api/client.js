@@ -20,7 +20,9 @@ async function readJson(response) {
 
 export async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const headers = {}
-  if (body !== undefined) {
+  // FormData (file uploads) sets its own multipart Content-Type with the boundary.
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) {
     headers['Content-Type'] = 'application/json'
   }
   if (token) {
@@ -30,7 +32,7 @@ export async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const response = await fetch(new URL(`/api${path}`, window.location.origin), {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined || isForm ? body : JSON.stringify(body),
   })
   const data = await readJson(response)
 
