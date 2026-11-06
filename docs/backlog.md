@@ -35,7 +35,7 @@ One ticket ≈ one PR. Branch: `feature/INV-<n>-short-description`. Commits: `IN
 | INV-17 | SNS topic, SQS alert-queue + DLQ, outbox publisher, email subscription | Test alert email arrives |
 | INV-18 | Lambda alert-recorder → DynamoDB (idempotent) | Duplicate message creates no second record |
 | INV-19 | API Gateway + JWT authorizer; Lambda alert-reader `GET /alerts` | Returns alerts; no token → 401 |
-| INV-20 | React Alerts page | States + component test |
+| INV-20 | React Alerts page (reads `GET /api/alerts` from the outbox until INV-19, A41) | States + component test |
 | INV-21 | CSV import backend: presigned upload, jobs, import-queue, worker, validation, upsert, restore | Appendix A → 3 imported, 2 errors with row numbers |
 | INV-22 | React import page with row-level error table | Component test |
 | INV-23 | Dashboard API and UI | Tests |

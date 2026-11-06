@@ -1150,6 +1150,66 @@
       ]
     },
     {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "List alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "pap",
+                  "disabled": true
+                },
+                {
+                  "key": "cause",
+                  "value": "STOCK_MOVEMENT",
+                  "disabled": true
+                },
+                {
+                  "key": "stillLow",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Any role. Newest first. cause is STOCK_MOVEMENT, CREATED or REORDER_LEVEL_RAISED."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a page of alerts', () => pm.expect(pm.response.json()).to.have.property('alerts'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Security checks",
       "item": [
         {
