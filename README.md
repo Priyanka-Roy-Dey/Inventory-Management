@@ -80,6 +80,24 @@ npm run lint
 npm run build
 ```
 
+## Quality gate (SonarCloud)
+
+Every pull request is analysed by [SonarCloud](https://sonarcloud.io) using the default "Sonar way" quality gate, which needs at least 80% test coverage on new code. CI uploads the coverage from `./mvnw verify` (JaCoCo) and `npm run test:coverage` (Vitest), and the **SonarCloud - quality gate** check fails if the gate fails.
+
+Run the same coverage locally:
+
+```bash
+cd api && ./mvnw verify            # api/target/site/jacoco/index.html
+cd web && npm run test:coverage    # web/coverage/lcov-report/index.html
+```
+
+One-time setup (already done for this repository; needed again only for a fork):
+
+1. Sign in at sonarcloud.io with GitHub and import this repository (free for public repositories).
+2. In the SonarCloud project, turn off **Automatic Analysis** (Administration → Analysis Method), because CI runs the analysis.
+3. Create a token (My Account → Security) and add it to the GitHub repository as the secret `SONAR_TOKEN` (Settings → Secrets and variables → Actions).
+4. Check that `sonar.organization` and `sonar.projectKey` in `sonar-project.properties` match the SonarCloud project.
+
 ## Deploying
 
 _To be completed in INV-16 / INV-24._

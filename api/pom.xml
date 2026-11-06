@@ -30,6 +30,7 @@
 		<java.version>17</java.version>
 		<springdoc.version>3.2.0</springdoc.version>
 		<awssdk.version>2.57.6</awssdk.version>
+		<jacoco.version>0.8.16</jacoco.version>
 	</properties>
 
 	<dependencyManagement>
@@ -159,6 +160,27 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!-- Test coverage for the quality gate (INV-7): target/site/jacoco/jacoco.xml after verify. -->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
