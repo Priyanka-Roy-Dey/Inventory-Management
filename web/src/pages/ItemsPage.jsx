@@ -38,7 +38,40 @@ function bySku(a, b) {
 
 const PAGE_SIZE = 20
 const SEARCH_DELAY_MS = 300
-const INITIAL_FILTERS = { search: '', category: '', lowStock: false, sort: 'sku', direction: 'asc', page: 0 }
+const INITIAL_FILTERS = {
+  search: '',
+  category: '',
+  lowStock: false,
+  minPrice: '',
+  maxPrice: '',
+  attributeName: '',
+  attributeValue: '',
+  pincode: '',
+  sort: 'sku',
+  direction: 'asc',
+  page: 0,
+}
+const PRICE = /^\d+(\.\d{1,2})?$/
+const PINCODE = /^[1-9]\d{5}$/
+
+// Typed filters are applied after a pause, and only once they make sense (INV-35).
+function draftProblems(drafts) {
+  const problems = {}
+  for (const field of ['minPrice', 'maxPrice']) {
+    if (drafts[field] && !PRICE.test(drafts[field])) {
+      problems[field] = 'Enter a price'
+    }
+  }
+  if (!problems.minPrice && !problems.maxPrice && drafts.minPrice && drafts.maxPrice) {
+    if (Number(drafts.minPrice) > Number(drafts.maxPrice)) {
+      problems.maxPrice = 'Min price is above max price'
+    }
+  }
+  if (drafts.pincode && !PINCODE.test(drafts.pincode)) {
+    problems.pincode = 'Enter 6 digits'
+  }
+  return problems
+}
 
 // The API's list parameters (INV-11); empty filters are left out.
 function toQuery(filters) {
@@ -56,6 +89,14 @@ function toQuery(filters) {
   if (filters.lowStock) {
     params.set('lowStock', 'true')
   }
+  for (const field of ['minPrice', 'maxPrice', 'pincode']) {
+    if (filters[field]) {
+      params.set(field, filters[field])
+    }
+  }
+  if (filters.attributeName && filters.attributeValue) {
+    params.set('attribute', `${filters.attributeName}:${filters.attributeValue}`)
+  }
   return params.toString()
 }
 
@@ -70,15 +111,16 @@ function SortableHeader({ field, label, filters, onSort, align }) {
   )
 }
 
-function Filters({ searchText, onSearchText, filters, categories, onChange }) {
+function Filters({ drafts, problems, onDraft, filters, categories, attributeOptions, onChange }) {
+  const values = attributeOptions.find((option) => option.name === filters.attributeName)?.values ?? []
   return (
-    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mb: 2 }}>
+    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'flex-start', mb: 2 }}>
       <TextField
         type="search"
         label="Search SKU or name"
         size="small"
-        value={searchText}
-        onChange={(event) => onSearchText(event.target.value)}
+        value={drafts.search}
+        onChange={(event) => onDraft({ search: event.target.value })}
         sx={{ minWidth: 240 }}
       />
       <TextField
@@ -96,6 +138,63 @@ function Filters({ searchText, onSearchText, filters, categories, onChange }) {
           </MenuItem>
         ))}
       </TextField>
+      <TextField
+        select
+        label="Attribute"
+        size="small"
+        value={filters.attributeName}
+        onChange={(event) => onChange({ attributeName: event.target.value, attributeValue: '' })}
+        sx={{ minWidth: 150 }}
+      >
+        <MenuItem value="">Any attribute</MenuItem>
+        {attributeOptions.map((option) => (
+          <MenuItem key={option.name} value={option.name}>
+            {option.name}
+          </MenuItem>
+        ))}
+      </TextField>
+      <TextField
+        select
+        label="Value"
+        size="small"
+        value={filters.attributeValue}
+        disabled={!filters.attributeName}
+        onChange={(event) => onChange({ attributeValue: event.target.value })}
+        sx={{ minWidth: 130 }}
+      >
+        <MenuItem value="">Any value</MenuItem>
+        {values.map((value) => (
+          <MenuItem key={value} value={value}>
+            {value}
+          </MenuItem>
+        ))}
+      </TextField>
+      {[
+        ['minPrice', 'Min price'],
+        ['maxPrice', 'Max price'],
+      ].map(([field, label]) => (
+        <TextField
+          key={field}
+          label={label}
+          size="small"
+          value={drafts[field]}
+          onChange={(event) => onDraft({ [field]: event.target.value.trim() })}
+          error={Boolean(problems[field])}
+          helperText={problems[field]}
+          slotProps={{ htmlInput: { inputMode: 'decimal' } }}
+          sx={{ width: 120 }}
+        />
+      ))}
+      <TextField
+        label="Delivers to pincode"
+        size="small"
+        value={drafts.pincode}
+        onChange={(event) => onDraft({ pincode: event.target.value.trim() })}
+        error={Boolean(problems.pincode)}
+        helperText={problems.pincode}
+        slotProps={{ htmlInput: { inputMode: 'numeric', maxLength: 6 } }}
+        sx={{ width: 170 }}
+      />
       <FormControlLabel
         control={
           <Switch checked={filters.lowStock} onChange={(event) => onChange({ lowStock: event.target.checked })} />
@@ -103,6 +202,23 @@ function Filters({ searchText, onSearchText, filters, categories, onChange }) {
         label="Low stock only"
       />
     </Box>
+  )
+}
+
+// The first two pincodes, then "+N"; all of them on hover.
+function DeliveryPincodes({ pincodes }) {
+  if (!pincodes || pincodes.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Anywhere
+      </Typography>
+    )
+  }
+  const extra = pincodes.length > 2 ? ` +${pincodes.length - 2}` : ''
+  return (
+    <Typography variant="body2" title={pincodes.join(', ')}>
+      {pincodes.slice(0, 2).join(', ') + extra}
+    </Typography>
   )
 }
 
@@ -132,6 +248,7 @@ function ItemsTable({ items, filters, onSort, onStock, onEdit, onDelete }) {
             <SortableHeader field="quantity" label="Quantity" align="right" {...sortable} />
             <TableCell align="right">Reorder level</TableCell>
             <SortableHeader field="unitPrice" label="Unit price" align="right" {...sortable} />
+            <TableCell>Delivers to</TableCell>
             <TableCell>Status</TableCell>
             {hasActions && <TableCell align="right">Actions</TableCell>}
           </TableRow>
@@ -143,11 +260,28 @@ function ItemsTable({ items, filters, onSort, onStock, onEdit, onDelete }) {
                 <ItemThumbnail item={item} />
               </TableCell>
               <TableCell>{item.sku}</TableCell>
-              <TableCell>{item.name}</TableCell>
+              <TableCell>
+                {item.name}
+                {item.attributes?.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+                    {item.attributes.map((attribute) => (
+                      <Chip
+                        key={attribute.name}
+                        label={`${attribute.name}: ${attribute.value}`}
+                        size="small"
+                        variant="outlined"
+                      />
+                    ))}
+                  </Box>
+                )}
+              </TableCell>
               <TableCell>{item.category}</TableCell>
               <TableCell align="right">{item.quantity}</TableCell>
               <TableCell align="right">{item.reorderLevel}</TableCell>
               <TableCell align="right">{formatPrice(item.unitPrice)}</TableCell>
+              <TableCell>
+                <DeliveryPincodes pincodes={item.deliveryPincodes} />
+              </TableCell>
               <TableCell>{item.lowStock && <Chip label="Low stock" color="warning" size="small" />}</TableCell>
               {hasActions && (
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
@@ -187,8 +321,11 @@ function ItemsPage() {
   const [state, setState] = useState({ status: 'loading', items: [], totalItems: 0 })
   const [attempt, setAttempt] = useState(0)
   const [filters, setFilters] = useState(INITIAL_FILTERS)
-  const [searchText, setSearchText] = useState('')
+  // What the user is typing; applied to `filters` after a pause, once valid.
+  const [drafts, setDrafts] = useState({ search: '', minPrice: '', maxPrice: '', pincode: '' })
   const [categories, setCategories] = useState([])
+  const [attributeOptions, setAttributeOptions] = useState([])
+  const problems = draftProblems(drafts)
   const query = toQuery(filters)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -199,6 +336,7 @@ function ItemsPage() {
 
   const fetchItems = useEffectEvent((itemsQuery) => request(`/items?${itemsQuery}`))
   const fetchCategories = useEffectEvent(() => request('/items/categories'))
+  const fetchAttributeOptions = useEffectEvent(() => request('/items/attributes'))
 
   useEffect(() => {
     let ignore = false
@@ -211,11 +349,15 @@ function ItemsPage() {
     }
   }, [query, attempt])
 
-  // Only fills the category filter, so a failure just leaves it with "All categories".
+  // Only fill the filter dropdowns, so a failure just leaves them with "All" / "Any".
   useEffect(() => {
     let ignore = false
     fetchCategories().then(
       (list) => !ignore && setCategories(list),
+      () => {},
+    )
+    fetchAttributeOptions().then(
+      (list) => !ignore && setAttributeOptions(list),
       () => {},
     )
     return () => {
@@ -223,17 +365,27 @@ function ItemsPage() {
     }
   }, [])
 
-  const applySearch = useEffectEvent((search) => {
-    if (search !== filters.search) {
-      changeFilters({ search })
+  const applyDrafts = useEffectEvent((typed) => {
+    const found = draftProblems(typed)
+    const changes = {}
+    for (const field of ['search', 'minPrice', 'maxPrice', 'pincode']) {
+      const value = field === 'search' ? typed.search.trim() : typed[field]
+      // A price range that cannot match is not applied, so both price fields wait for each other.
+      const blocked = found[field] || (field.endsWith('Price') && (found.minPrice || found.maxPrice))
+      if (!blocked && value !== filters[field]) {
+        changes[field] = value
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      changeFilters(changes)
     }
   })
 
   // Waits until the user stops typing, so a word sends one request rather than one per letter.
   useEffect(() => {
-    const timer = setTimeout(() => applySearch(searchText.trim()), SEARCH_DELAY_MS)
+    const timer = setTimeout(() => applyDrafts(drafts), SEARCH_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [searchText])
+  }, [drafts])
 
   // Any change except moving between pages starts again on the first page.
   function changeFilters(changes) {
@@ -251,7 +403,15 @@ function ItemsPage() {
     setAttempt(attempt + 1)
   }
 
-  const filtering = Boolean(filters.search || filters.category || filters.lowStock)
+  const filtering = Boolean(
+    filters.search ||
+      filters.category ||
+      filters.lowStock ||
+      filters.minPrice ||
+      filters.maxPrice ||
+      filters.attributeValue ||
+      filters.pincode,
+  )
 
   async function createItem(body) {
     const created = await request('/items', { method: 'POST', body })
@@ -324,10 +484,12 @@ function ItemsPage() {
         )}
       </Box>
       <Filters
-        searchText={searchText}
-        onSearchText={setSearchText}
+        drafts={drafts}
+        problems={problems}
+        onDraft={(changes) => setDrafts({ ...drafts, ...changes })}
         filters={filters}
         categories={categories}
+        attributeOptions={attributeOptions}
         onChange={changeFilters}
       />
       {state.status === 'loading' && <CircularProgress aria-label="Loading items" />}

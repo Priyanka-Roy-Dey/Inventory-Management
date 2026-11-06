@@ -503,7 +503,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sku\": \"PAP-A4\",\n  \"name\": \"A4 paper\",\n  \"category\": \"Stationery\",\n  \"quantity\": 40,\n  \"reorderLevel\": 10,\n  \"unitPrice\": 4.5\n}",
+              "raw": "{\n  \"sku\": \"PAP-A4\",\n  \"name\": \"A4 paper\",\n  \"category\": \"Stationery\",\n  \"quantity\": 40,\n  \"reorderLevel\": 10,\n  \"unitPrice\": 4.5,\n  \"attributes\": [\n    {\n      \"name\": \"Colour\",\n      \"value\": \"Blue\"\n    }\n  ],\n  \"deliveryPincodes\": [\n    \"560001\",\n    \"110001\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -566,6 +566,26 @@
                 {
                   "key": "size",
                   "value": "20"
+                },
+                {
+                  "key": "attribute",
+                  "value": "Colour:Blue",
+                  "disabled": true
+                },
+                {
+                  "key": "pincode",
+                  "value": "560001",
+                  "disabled": true
+                },
+                {
+                  "key": "minPrice",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "10",
+                  "disabled": true
                 }
               ]
             },
@@ -579,6 +599,35 @@
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is a page', () => pm.expect(pm.response.json()).to.have.keys('items','page','size','totalItems','totalPages'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List attributes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/items/attributes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "attributes"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
                 ]
               }
             }

@@ -2,6 +2,8 @@ import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, 
 import { useState } from 'react'
 import { ApiError } from '../api/client'
 import ImagePicker from './ImagePicker'
+import ItemDetailsFields from './ItemDetailsFields'
+import { toDetailsBody, validateDetails } from './itemDetails'
 import useImageChoice from './useImageChoice'
 
 // The same rules as the API, so most mistakes are caught before a request is sent.
@@ -9,7 +11,7 @@ const SKU_PATTERN = /^[A-Za-z0-9._-]+$/
 const WHOLE_NUMBER = /^\d+$/
 const PRICE = /^\d{1,8}(\.\d{1,2})?$/
 
-const EMPTY = { sku: '', name: '', category: '', quantity: '', reorderLevel: '', unitPrice: '' }
+const EMPTY = { sku: '', name: '', category: '', quantity: '', reorderLevel: '', unitPrice: '', attributes: [], pincodes: '' }
 
 function validate(values) {
   const errors = {}
@@ -39,7 +41,7 @@ function validate(values) {
   if (!PRICE.test(values.unitPrice.trim())) {
     errors.unitPrice = 'Enter a price of 0 or more with up to 2 decimals'
   }
-  return errors
+  return { ...errors, ...validateDetails(values) }
 }
 
 function fromItem(item) {
@@ -50,6 +52,8 @@ function fromItem(item) {
     quantity: String(item.quantity),
     reorderLevel: String(item.reorderLevel),
     unitPrice: Number(item.unitPrice).toFixed(2),
+    attributes: (item.attributes ?? []).map(({ name, value }) => ({ name, value })),
+    pincodes: (item.deliveryPincodes ?? []).join(', '),
   }
 }
 
@@ -61,6 +65,7 @@ function toUpdateBody(values, version) {
     reorderLevel: Number(values.reorderLevel),
     unitPrice: Number(values.unitPrice),
     version,
+    ...toDetailsBody(values),
   }
 }
 
@@ -72,6 +77,7 @@ function toCreateBody(values) {
     quantity: Number(values.quantity),
     reorderLevel: Number(values.reorderLevel),
     unitPrice: Number(values.unitPrice),
+    ...toDetailsBody(values),
   }
 }
 
@@ -197,6 +203,12 @@ function ItemFormDialog({ item, onSave, onReload, onUploadImage, onClose }) {
               />
             )
           })}
+          <ItemDetailsFields
+            attributes={values.attributes}
+            pincodes={values.pincodes}
+            errors={errors}
+            onChange={(changes) => setValues({ ...values, ...changes })}
+          />
           {!editing && <ImagePicker choice={imageChoice} hint="Optional: JPEG, PNG or WebP, up to 2 MB" />}
         </DialogContent>
         <DialogActions>

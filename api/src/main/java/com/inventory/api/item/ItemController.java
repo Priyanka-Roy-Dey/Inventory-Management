@@ -1,6 +1,7 @@
 package com.inventory.api.item;
 
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,21 +36,32 @@ public class ItemController {
 	}
 
 	/**
-	 * Search, filters, sort and page are all optional (INV-11). Example:
-	 * {@code ?search=pap&category=Stationery&lowStock=true&sort=quantity,desc&page=0&size=20}.
+	 * Search, filters, sort and page are all optional (INV-11, INV-35). Example:
+	 * {@code ?search=pen&category=Stationery&attribute=Colour:Blue&pincode=560001&minPrice=1&maxPrice=5&page=0}.
+	 * {@code attribute} can be repeated; every one must match.
 	 */
 	@GetMapping
 	public ItemPage list(@RequestParam(required = false) String search,
 			@RequestParam(required = false) String category, @RequestParam(required = false) Boolean lowStock,
 			@RequestParam(required = false) String sort, @RequestParam(required = false) Integer page,
-			@RequestParam(required = false) Integer size) {
-		return itemService.search(new ItemQuery(search, category, lowStock, sort, page, size));
+			@RequestParam(required = false) Integer size, @RequestParam(required = false) BigDecimal minPrice,
+			@RequestParam(required = false) BigDecimal maxPrice,
+			@RequestParam(name = "attribute", required = false) List<String> attributes,
+			@RequestParam(required = false) String pincode) {
+		return itemService.search(new ItemQuery(search, category, lowStock, sort, page, size, minPrice, maxPrice,
+				attributes, pincode));
 	}
 
 	// For the category filter on the Items page.
 	@GetMapping("/categories")
 	public List<String> categories() {
 		return itemService.categories();
+	}
+
+	// For the attribute filter on the Items page.
+	@GetMapping("/attributes")
+	public List<AttributeOptions> attributes() {
+		return itemService.attributeOptions();
 	}
 
 	@GetMapping("/{id}")

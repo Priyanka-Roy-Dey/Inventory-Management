@@ -56,6 +56,7 @@ function serveItems(items) {
   server.use(
     http.get('/api/items', () => HttpResponse.json(pageOf(items))),
     http.get('/api/items/categories', () => HttpResponse.json([...new Set(items.map((item) => item.category))].sort())),
+    http.get('/api/items/attributes', () => HttpResponse.json([])),
   )
 }
 
@@ -200,6 +201,8 @@ describe('ItemsPage Add item', () => {
       quantity: 40,
       reorderLevel: 10,
       unitPrice: 4.5,
+      attributes: [],
+      deliveryPincodes: [],
     })
     const rows = within(screen.getByRole('table', { name: 'Items' })).getAllByRole('row')
     expect(within(rows[2]).getByText('PAP-A4')).toBeInTheDocument()
@@ -305,6 +308,8 @@ describe('ItemsPage Edit item', () => {
       reorderLevel: 10,
       unitPrice: 4.5,
       version: 0,
+      attributes: [],
+      deliveryPincodes: [],
     })
   })
 
@@ -866,6 +871,8 @@ describe('ItemsPage Add item image', () => {
           quantity: 40,
           reorderLevel: 10,
           unitPrice: 4.5,
+          attributes: [],
+          deliveryPincodes: [],
           imageKey: 'new-items/abc.png',
         },
       ],
@@ -913,7 +920,12 @@ describe('ItemsPage Add item image', () => {
 
 describe('ItemsPage search, filters, sorting and pages', () => {
   // Answers like the API and remembers every query it was asked.
-  function serveSearch({ items = [PAPER, CABLE], totalItems, categories = ['Cables', 'Stationery'] } = {}) {
+  function serveSearch({
+    items = [PAPER, CABLE],
+    totalItems,
+    categories = ['Cables', 'Stationery'],
+    attributes = [{ name: 'Colour', values: ['Black', 'Blue'] }],
+  } = {}) {
     const queries = []
     server.use(
       http.get('/api/items', ({ request }) => {
@@ -924,6 +936,7 @@ describe('ItemsPage search, filters, sorting and pages', () => {
         )
       }),
       http.get('/api/items/categories', () => HttpResponse.json(categories)),
+      http.get('/api/items/attributes', () => HttpResponse.json(attributes)),
     )
     return queries
   }
@@ -1003,5 +1016,184 @@ describe('ItemsPage search, filters, sorting and pages', () => {
     await userEvent.click(screen.getByRole('switch', { name: 'Low stock only' }))
 
     expect(await screen.findByText('No items match your search.')).toBeInTheDocument()
+  })
+})
+
+const PEN = {
+  ...PAPER,
+  id: 5,
+  sku: 'PEN-BLU',
+  name: 'Blue pen',
+  attributes: [
+    { name: 'Colour', value: 'Blue' },
+    { name: 'Tip', value: '0.5 mm' },
+  ],
+  deliveryPincodes: ['110001', '400001', '560001'],
+}
+
+describe('ItemsPage attributes and delivery pincodes', () => {
+  it('shows attributes as chips and where an item is delivered', async () => {
+    serveItems([PEN, PAPER])
+    renderPage('VIEWER')
+
+    const row = (await screen.findByText('PEN-BLU')).closest('tr')
+    expect(within(row).getByText('Colour: Blue')).toBeInTheDocument()
+    expect(within(row).getByText('Tip: 0.5 mm')).toBeInTheDocument()
+    expect(within(row).getByText('110001, 400001 +1')).toHaveAttribute('title', '110001, 400001, 560001')
+    expect(within(rowFor('PAP-A4')).getByText('Anywhere')).toBeInTheDocument()
+  })
+
+  it('adds attributes and pincodes when creating an item', async () => {
+    let body
+    serveItems([])
+    server.use(
+      http.post('/api/items', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json(PEN, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openAddItem()
+
+    await fillForm(dialog, VALID)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add attribute' }))
+    await userEvent.type(within(dialog).getByLabelText('Attribute 1 name'), 'Colour')
+    await userEvent.type(within(dialog).getByLabelText('Attribute 1 value'), 'Blue')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add attribute' }))
+    await userEvent.type(within(dialog).getByLabelText('Attribute 2 name'), 'Tip')
+    await userEvent.type(within(dialog).getByLabelText('Attribute 2 value'), '0.5 mm')
+    await userEvent.type(within(dialog).getByLabelText(/^Delivery pincodes/), '560001, 110001 560001')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('PEN-BLU')).toBeInTheDocument()
+    expect(body.attributes).toEqual([
+      { name: 'Colour', value: 'Blue' },
+      { name: 'Tip', value: '0.5 mm' },
+    ])
+    expect(body.deliveryPincodes).toEqual(['560001', '110001'])
+  })
+
+  it('blocks invalid attributes and pincodes', async () => {
+    let posted = false
+    serveItems([])
+    server.use(
+      http.post('/api/items', () => {
+        posted = true
+        return HttpResponse.json(PEN, { status: 201 })
+      }),
+    )
+    renderPage()
+    const dialog = await openAddItem()
+
+    await fillForm(dialog, VALID)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add attribute' }))
+    await userEvent.type(within(dialog).getByLabelText('Attribute 1 name'), 'Colour')
+    await userEvent.type(within(dialog).getByLabelText('Attribute 1 value'), 'Blue')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add attribute' }))
+    await userEvent.type(within(dialog).getByLabelText('Attribute 2 name'), 'colour')
+    await userEvent.type(within(dialog).getByLabelText('Attribute 2 value'), 'Red')
+    await userEvent.type(within(dialog).getByLabelText(/^Delivery pincodes/), '560001, 01234')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(within(dialog).getByText('Colour is given more than once')).toBeInTheDocument()
+    expect(within(dialog).getByText('01234 is not a 6-digit pincode')).toBeInTheDocument()
+    expect(posted).toBe(false)
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove attribute 2' }))
+    expect(within(dialog).queryByLabelText('Attribute 2 name')).not.toBeInTheDocument()
+  })
+
+  it('edits the attributes and pincodes an item already has', async () => {
+    let body
+    serveItems([PEN])
+    server.use(
+      http.put('/api/items/5', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ ...PEN, version: 1 })
+      }),
+    )
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit PEN-BLU' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit item' })
+
+    expect(within(dialog).getByLabelText('Attribute 1 name')).toHaveValue('Colour')
+    expect(within(dialog).getByLabelText('Attribute 2 value')).toHaveValue('0.5 mm')
+    expect(within(dialog).getByLabelText(/^Delivery pincodes/)).toHaveValue('110001, 400001, 560001')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove attribute 2' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(body).toBeDefined())
+    expect(body.attributes).toEqual([{ name: 'Colour', value: 'Blue' }])
+    expect(body.deliveryPincodes).toEqual(['110001', '400001', '560001'])
+  })
+})
+
+describe('ItemsPage price, attribute and pincode filters', () => {
+  function serveFilters() {
+    const queries = []
+    server.use(
+      http.get('/api/items', ({ request }) => {
+        queries.push(Object.fromEntries(new URL(request.url).searchParams))
+        return HttpResponse.json(pageOf([PEN, PAPER]))
+      }),
+      http.get('/api/items/categories', () => HttpResponse.json(['Stationery'])),
+      http.get('/api/items/attributes', () =>
+        HttpResponse.json([
+          { name: 'Colour', values: ['Black', 'Blue'] },
+          { name: 'Tip', values: ['0.5 mm'] },
+        ]),
+      ),
+    )
+    return queries
+  }
+
+  it('filters by a price range', async () => {
+    const queries = serveFilters()
+    renderPage()
+    await screen.findByText('PEN-BLU')
+
+    await userEvent.type(screen.getByLabelText('Min price'), '1')
+    await userEvent.type(screen.getByLabelText('Max price'), '5.5')
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ minPrice: '1', maxPrice: '5.5', page: '0' }))
+  })
+
+  it('explains a price range that cannot match', async () => {
+    const queries = serveFilters()
+    renderPage()
+    await screen.findByText('PEN-BLU')
+
+    await userEvent.type(screen.getByLabelText('Min price'), '9')
+    await userEvent.type(screen.getByLabelText('Max price'), '2')
+
+    expect(await screen.findByText('Min price is above max price')).toBeInTheDocument()
+    expect(queries.some((query) => query.maxPrice === '2')).toBe(false)
+  })
+
+  it('filters by an attribute value', async () => {
+    const queries = serveFilters()
+    renderPage()
+    await screen.findByText('PEN-BLU')
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Attribute' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Colour' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Value' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Blue' }))
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ attribute: 'Colour:Blue' }))
+  })
+
+  it('filters by delivery pincode once all six digits are typed', async () => {
+    const queries = serveFilters()
+    renderPage()
+    await screen.findByText('PEN-BLU')
+
+    await userEvent.type(screen.getByLabelText('Delivers to pincode'), '5600')
+    expect(await screen.findByText('Enter 6 digits')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Delivers to pincode'), '01')
+
+    await waitFor(() => expect(queries.at(-1)).toMatchObject({ pincode: '560001' }))
+    expect(queries.some((query) => query.pincode === '5600')).toBe(false)
   })
 })
