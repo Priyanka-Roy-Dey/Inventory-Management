@@ -1,0 +1,6 @@
+# Only what the Dockerfile copies is needed; keep build output, editor files and secrets out of the image.
+*
+!mvnw
+!pom.xml
+!.mvn/
+!src/main/
