@@ -13,10 +13,11 @@ COPY src src
 RUN ./mvnw -B -q package -Dmaven.test.skip=true -Djacoco.skip=true \
     && cp target/inventory-api-*.jar app.jar
 
-FROM eclipse-temurin:17-jre
+# Alpine keeps the runtime small; the Ubuntu base carried apt and pcre2, which the API never uses but scans flag.
+FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
+RUN addgroup -S app && adduser -S -G app -H app
 COPY --from=build --chown=app:app /workspace/app.jar app.jar
 USER app
 
