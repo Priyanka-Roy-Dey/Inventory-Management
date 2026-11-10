@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp database (INV-14): private RDS Postgres 17, credentials generated into Secrets Manager,
+  storage and secret encrypted with a customer-managed KMS key. Needs the inventory-network stack (INV-13).
+  Deploy with --tags project=inventory.
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and exports; must match the network stack.
+  InstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: RDS instance size (smallest Graviton class to keep cost down).
+
+Resources:
+  # One key for the database storage and the secret, so access to both is controlled in one place.
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${Project} database storage and credentials'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministers
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+      Tags: [{ Key: Name, Value: !Sub '${Project}-db' }]
+
+  EncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${Project}-db'
+      TargetKeyId: !Ref EncryptionKey
+
+  # AWS generates the password; it never appears in code, the template or the console output.
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${Project}/db'
+      Description: Postgres credentials for the InventoryApp API
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "inventory_app"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for the InventoryApp database
+      SubnetIds: !Split [',', !ImportValue { 'Fn::Sub': '${Project}-private-subnets' }]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${Project}-db'
+      Engine: postgres
+      EngineVersion: '17'
+      DBInstanceClass: !Ref InstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !Ref EncryptionKey
+      DBName: inventory
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      VPCSecurityGroups: [!ImportValue { 'Fn::Sub': '${Project}-db-sg' }]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 1
+      CopyTagsToSnapshot: true
+      AutoMinorVersionUpgrade: true
+      Tags: [{ Key: Name, Value: !Sub '${Project}-db' }]
+
+  # Adds host, port, dbname and engine to the secret so the API needs only the secret.
+  DatabaseSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DatabaseSecret
+      TargetId: !Ref Database
+      TargetType: AWS::RDS::DBInstance
+
+# Exported so the service stack (INV-15) can point the API at the database.
+Outputs:
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+    Export: { Name: !Sub '${Project}-db-endpoint' }
+  DatabasePort:
+    Value: !GetAtt Database.Endpoint.Port
+    Export: { Name: !Sub '${Project}-db-port' }
+  DatabaseName:
+    Value: inventory
+    Export: { Name: !Sub '${Project}-db-name' }
+  DatabaseSecretArn:
+    Value: !Ref DatabaseSecret
+    Export: { Name: !Sub '${Project}-db-secret-arn' }
+  EncryptionKeyArn:
+    Value: !GetAtt EncryptionKey.Arn
+    Export: { Name: !Sub '${Project}-db-key-arn' }
