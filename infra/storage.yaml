@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp storage (INV-15): private S3 bucket for item images (A36), uploaded and read through presigned URLs.
+  Kept apart from the service stack so the service can be deleted to save cost without losing images.
+  Deploy with --tags project=inventory.
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and exports.
+  AllowedOrigin:
+    Type: String
+    Default: '*'
+    Description: >-
+      Browser origin allowed to upload and read images. Presigned URLs are what authorise each request;
+      narrow this to the CloudFront address in INV-24.
+
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    # Images outlive the stack; delete the bucket by hand if it is really no longer needed.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${Project}-images-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      # The browser PUTs uploads and GETs images straight from S3 (A36).
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, PUT]
+            AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedHeaders: ['*']
+            MaxAge: 3000
+      # No new-items/ expiry yet: a new item keeps its image under new-items/, so the rule would delete it (A36).
+      Tags: [{ Key: Name, Value: !Sub '${Project}-images' }]
+
+  # Refuse anything that is not HTTPS.
+  ImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImagesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: HttpsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt ImagesBucket.Arn, !Sub '${ImagesBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+
+# Exported for the service stack (INV-15).
+Outputs:
+  ImagesBucketName:
+    Value: !Ref ImagesBucket
+    Export: { Name: !Sub '${Project}-images-bucket' }
+  ImagesBucketArn:
+    Value: !GetAtt ImagesBucket.Arn
+    Export: { Name: !Sub '${Project}-images-bucket-arn' }
