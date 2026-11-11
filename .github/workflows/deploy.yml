@@ -1,0 +1,114 @@
+name: Deploy
+
+# INV-16: after CI passes on main, build the API image, push it to ECR and roll it out to the sandbox.
+# The job runs in the "sandbox" environment, so it waits for a required reviewer to approve it, and only that
+# environment can assume the AWS deploy role (infra/github-deploy.yaml).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy at a time; a newer merge waits instead of cancelling one that is rolling out.
+concurrency:
+  group: deploy-sandbox
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build image and deploy to sandbox
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: sandbox
+      url: ${{ steps.smoke.outputs.api_url }}
+    env:
+      AWS_REGION: eu-north-1
+      REPOSITORY: inventory-api
+      STACK: inventory-service
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check out the commit CI tested
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.HEAD_SHA }}
+
+      - name: Image tag from the commit
+        run: echo "TAG=${HEAD_SHA::12}" >> "$GITHUB_ENV"
+
+      - name: AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and push the image
+        run: |
+          REPO_URI=$(aws ecr describe-repositories --repository-names "$REPOSITORY" --query 'repositories[0].repositoryUri' --output text)
+          echo "REPO_URI=$REPO_URI" >> "$GITHUB_ENV"
+          # Tags are immutable, so a re-run of the same commit reuses the image it already pushed.
+          if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" > /dev/null 2>&1; then
+            echo "::notice::Image $TAG already in ECR; not rebuilding."
+            exit 0
+          fi
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO_URI%%/*}"
+          docker build --pull -t "$REPO_URI:$TAG" api
+          docker push "$REPO_URI:$TAG"
+
+      - name: Stop on HIGH or CRITICAL vulnerabilities
+        run: |
+          aws ecr wait image-scan-complete --repository-name "$REPOSITORY" --image-id imageTag="$TAG"
+          COUNTS=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORY" --image-id imageTag="$TAG" \
+            --query 'imageScanFindings.findingSeverityCounts' --output json)
+          echo "Scan findings: $COUNTS"
+          BLOCKING=$(echo "$COUNTS" | jq '(.CRITICAL // 0) + (.HIGH // 0)')
+          if [ "$BLOCKING" -gt 0 ]; then
+            echo "::error::Image $TAG has $BLOCKING HIGH/CRITICAL findings; not deploying."
+            exit 1
+          fi
+
+      - name: Roll out the new image
+        run: |
+          # Only the image tag changes; infrastructure changes to infra/service.yaml are deployed by hand.
+          set +e
+          OUTPUT=$(aws cloudformation update-stack --stack-name "$STACK" --use-previous-template \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameters ParameterKey=ImageTag,ParameterValue="$TAG" \
+              ParameterKey=Project,UsePreviousValue=true \
+              ParameterKey=JwtKeySecretArn,UsePreviousValue=true \
+              ParameterKey=AdminSecretArn,UsePreviousValue=true \
+              ParameterKey=DesiredCount,UsePreviousValue=true \
+              ParameterKey=Cpu,UsePreviousValue=true \
+              ParameterKey=Memory,UsePreviousValue=true 2>&1)
+          STATUS=$?
+          set -e
+          if [ $STATUS -ne 0 ]; then
+            if echo "$OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "::notice::$STACK already runs $TAG."
+              exit 0
+            fi
+            echo "$OUTPUT"
+            exit $STATUS
+          fi
+          # Fails if the ECS circuit breaker rolls the deployment back.
+          aws cloudformation wait stack-update-complete --stack-name "$STACK"
+
+      - name: Smoke test through the load balancer
+        id: smoke
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS "$API_URL/actuator/health" | grep -q '"status":"UP"'; then
+              echo "API is UP at $API_URL running $TAG"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$API_URL/actuator/health did not report UP"
+          exit 1
