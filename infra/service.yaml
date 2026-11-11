@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   InventoryApp API service (INV-15): public ALB -> ECS Fargate tasks in private subnets, CloudWatch logs,
   secrets injected from Secrets Manager. Needs the network, database, registry and storage stacks.
-  Deploy with --tags project=inventory.
+  Deploy with --capabilities CAPABILITY_NAMED_IAM --tags project=inventory; later image updates come from GitHub (INV-16).
 
 Parameters:
   Project:
@@ -30,19 +30,15 @@ Parameters:
     Default: '1024'
     AllowedValues: ['512', '1024', '2048']
 
-Resources:
-  # The first Admin (A16); AWS generates the password. The API only creates this user if no Admin exists.
-  AdminSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub '${Project}/admin'
-      Description: First Admin user for the InventoryApp API
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "admin"}'
-        GenerateStringKey: password
-        PasswordLength: 24
-        ExcludePunctuation: true
+  # Created outside this stack: the Admin it seeds lives on in the database when the service is deleted.
+  AdminSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:.+'
+    Description: >-
+      ARN of the secret holding the first Admin as JSON {"username", "password"} (A16). The API only creates
+      this user if no Admin exists.
 
+Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -59,6 +55,8 @@ Resources:
   ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      # Named so the GitHub deploy role (INV-16) can be allowed to pass exactly these roles.
+      RoleName: !Sub '${Project}-api-execution'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -75,7 +73,7 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   - !ImportValue { 'Fn::Sub': '${Project}-db-secret-arn' }
-                  - !Ref AdminSecret
+                  - !Ref AdminSecretArn
                   - !Ref JwtKeySecretArn
               # The database secret is encrypted with the INV-14 key.
               - Effect: Allow
@@ -86,6 +84,7 @@ Resources:
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub '${Project}-api-task'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -149,9 +148,9 @@ Resources:
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue { 'Fn::Sub': '${Project}-db-secret-arn' }
             - Name: INVENTORY_ADMIN_USERNAME
-              ValueFrom: !Sub '${AdminSecret}:username::'
+              ValueFrom: !Sub '${AdminSecretArn}:username::'
             - Name: INVENTORY_ADMIN_PASSWORD
-              ValueFrom: !Sub '${AdminSecret}:password::'
+              ValueFrom: !Sub '${AdminSecretArn}:password::'
             - Name: INVENTORY_JWT_PRIVATEKEY
               ValueFrom: !Ref JwtKeySecretArn
           LogConfiguration:
@@ -227,6 +226,3 @@ Outputs:
   LoadBalancerArn:
     Value: !Ref LoadBalancer
     Export: { Name: !Sub '${Project}-alb-arn' }
-  AdminSecretName:
-    Description: Secrets Manager secret with the first Admin's username and password.
-    Value: !Sub '${Project}/admin'
