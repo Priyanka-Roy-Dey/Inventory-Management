@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  InventoryApp deploy access for GitHub Actions (INV-16): OIDC identity provider and a role that only jobs in the
-  repository's sandbox environment can assume, with short-lived credentials and no stored keys. The role can push the
+  InventoryApp deploy access for GitHub Actions (INV-16): a role, trusted through the account's GitHub OIDC provider,
+  that only jobs in the repository's sandbox environment can assume, with short-lived credentials and no stored keys. The role can push the
   API image and update the image tag of the inventory-service stack, nothing else.
   Deploy with --capabilities CAPABILITY_NAMED_IAM --tags project=inventory.
 
@@ -20,14 +20,8 @@ Parameters:
     Description: GitHub environment (with required reviewers) that deploy jobs must run in.
 
 Resources:
-  # One per account; GitHub's tokens are verified against it.
-  GitHubOidcProvider:
-    Type: AWS::IAM::OIDCProvider
-    Properties:
-      Url: https://token.actions.githubusercontent.com
-      ClientIdList: [sts.amazonaws.com]
-      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1, 1c58a3a8518e8759bf075b76b750d4f2df264fcd]
-
+  # Uses the account's GitHub OIDC provider instead of creating one: an account can only have one per URL, and it
+  # already exists here. Create it once with `aws iam create-open-id-connect-provider` in a fresh account.
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -37,7 +31,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: { Federated: !Ref GitHubOidcProvider }
+            Principal: { Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com' }
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
