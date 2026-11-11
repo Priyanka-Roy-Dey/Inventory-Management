@@ -17,7 +17,8 @@ RUN ./mvnw -B -q package -Dmaven.test.skip=true -Djacoco.skip=true \
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-RUN addgroup -S app && adduser -S -G app -H app
+# Pick up Alpine security fixes released after the base image was built.
+RUN apk upgrade --no-cache && addgroup -S app && adduser -S -G app -H app
 COPY --from=build --chown=app:app /workspace/app.jar app.jar
 USER app
 
