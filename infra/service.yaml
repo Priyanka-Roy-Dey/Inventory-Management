@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp API service (INV-15): public ALB -> ECS Fargate tasks in private subnets, CloudWatch logs,
+  secrets injected from Secrets Manager. Needs the network, database, registry and storage stacks.
+  Deploy with --tags project=inventory.
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and imports; must match the other stacks.
+  ImageTag:
+    Type: String
+    Description: Tag of the inventory-api image in ECR to run (the git commit SHA, e.g. c3441e8f5a59).
+  JwtKeySecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:.+'
+    Description: ARN of the secret holding the PEM PKCS#8 RSA private key that signs tokens (A43).
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: Number of API tasks; 0 stops the API without deleting the stack.
+  Cpu:
+    Type: String
+    Default: '512'
+    AllowedValues: ['256', '512', '1024']
+  Memory:
+    Type: String
+    Default: '1024'
+    AllowedValues: ['512', '1024', '2048']
+
+Resources:
+  # The first Admin (A16); AWS generates the password. The API only creates this user if no Admin exists.
+  AdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${Project}/admin'
+      Description: First Admin user for the InventoryApp API
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: password
+        PasswordLength: 24
+        ExcludePunctuation: true
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${Project}/api'
+      RetentionInDays: 14
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${Project}'
+      Tags: [{ Key: Name, Value: !Sub '${Project}' }]
+
+  # Used by ECS itself: pull the image, write logs, read the secrets it injects.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy']
+      Policies:
+        - PolicyName: read-injected-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !ImportValue { 'Fn::Sub': '${Project}-db-secret-arn' }
+                  - !Ref AdminSecret
+                  - !Ref JwtKeySecretArn
+              # The database secret is encrypted with the INV-14 key.
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !ImportValue { 'Fn::Sub': '${Project}-db-key-arn' }
+
+  # Used by the API code: the images bucket and nothing else.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: images-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject']
+                Resource: !Sub
+                  - '${BucketArn}/*'
+                  - BucketArn: !ImportValue { 'Fn::Sub': '${Project}-images-bucket-arn' }
+              # Without it S3 answers 403 instead of 404 for a missing upload, which the API treats as an error.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !ImportValue { 'Fn::Sub': '${Project}-images-bucket-arn' }
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${Project}-api'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      RuntimePlatform: { OperatingSystemFamily: LINUX, CpuArchitecture: X86_64 }
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub
+            - '${RepositoryUri}:${ImageTag}'
+            - RepositoryUri: !ImportValue { 'Fn::Sub': '${Project}-api-repository-uri' }
+          Essential: true
+          PortMappings: [{ ContainerPort: 8080, Protocol: tcp }]
+          Environment:
+            # application-aws.properties: real S3 instead of the local S3Mock.
+            - Name: SPRING_PROFILES_ACTIVE
+              Value: aws
+            - Name: SPRING_DATASOURCE_URL
+              Value: !Sub
+                - 'jdbc:postgresql://${Host}:${Port}/${Database}'
+                - Host: !ImportValue { 'Fn::Sub': '${Project}-db-endpoint' }
+                  Port: !ImportValue { 'Fn::Sub': '${Project}-db-port' }
+                  Database: !ImportValue { 'Fn::Sub': '${Project}-db-name' }
+            - Name: INVENTORY_IMAGES_BUCKET
+              Value: !ImportValue { 'Fn::Sub': '${Project}-images-bucket' }
+            - Name: INVENTORY_IMAGES_REGION
+              Value: !Ref AWS::Region
+          Secrets:
+            - Name: SPRING_DATASOURCE_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue { 'Fn::Sub': '${Project}-db-secret-arn' }
+            - Name: SPRING_DATASOURCE_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue { 'Fn::Sub': '${Project}-db-secret-arn' }
+            - Name: INVENTORY_ADMIN_USERNAME
+              ValueFrom: !Sub '${AdminSecret}:username::'
+            - Name: INVENTORY_ADMIN_PASSWORD
+              ValueFrom: !Sub '${AdminSecret}:password::'
+            - Name: INVENTORY_JWT_PRIVATEKEY
+              ValueFrom: !Ref JwtKeySecretArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${Project}-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Split [',', !ImportValue { 'Fn::Sub': '${Project}-public-subnets' }]
+      SecurityGroups: [!ImportValue { 'Fn::Sub': '${Project}-alb-sg' }]
+      Tags: [{ Key: Name, Value: !Sub '${Project}-alb' }]
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${Project}-api'
+      VpcId: !ImportValue { 'Fn::Sub': '${Project}-vpc-id' }
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8080
+      HealthCheckPath: /actuator/health
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: '200' }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: '30' }
+
+  # HTTP only until CloudFront adds HTTPS in front of it (INV-24); there is no domain for a certificate yet.
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions: [{ Type: forward, TargetGroupArn: !Ref TargetGroup }]
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: !Sub '${Project}-api'
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      # Flyway migrates and Spring starts before the first health check counts.
+      HealthCheckGracePeriodSeconds: 120
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split [',', !ImportValue { 'Fn::Sub': '${Project}-private-subnets' }]
+          SecurityGroups: [!ImportValue { 'Fn::Sub': '${Project}-app-sg' }]
+      LoadBalancers:
+        - { ContainerName: api, ContainerPort: 8080, TargetGroupArn: !Ref TargetGroup }
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API through the load balancer.
+    Value: !Sub 'http://${LoadBalancer.DNSName}'
+    Export: { Name: !Sub '${Project}-api-url' }
+  LoadBalancerArn:
+    Value: !Ref LoadBalancer
+    Export: { Name: !Sub '${Project}-alb-arn' }
+  AdminSecretName:
+    Description: Secrets Manager secret with the first Admin's username and password.
+    Value: !Sub '${Project}/admin'
