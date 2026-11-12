@@ -11,7 +11,7 @@ The [architecture diagram](../README.md#architecture) is in the README. As built
 - **Database:** RDS PostgreSQL in private subnets, encrypted with KMS, reachable only from the ECS security group.
 - **Network:** VPC across 2 Availability Zones. Public subnets: ALB, NAT gateway. Private subnets: ECS tasks, RDS.
 - **Alerts:** a stock movement that crosses the reorder level writes an outbox event in the same transaction (2.5). The Alerts page reads those events from the API (A41). The SNS, SQS, Lambda and DynamoDB path is planned ([section 4](#4-deferred-work)).
-- **CSV import:** synchronous `POST /api/items/import`, checking every row and saving all of it or none (A42). The queued version is planned ([section 4](#4-deferred-work)).
+- **CSV import:** synchronous `POST /api/items/import`: bad rows are reported with their row numbers and skipped, and the valid rows are saved together in one transaction (A42). The queued version is planned ([section 4](#4-deferred-work)).
 - **Item images:** uploaded and read straight from the browser to S3 through presigned URLs (A36).
 - **Secrets:** Secrets Manager (DB credentials, JWT signing key, initial Admin), injected into ECS tasks. KMS encryption at rest.
 - **Monitoring:** CloudWatch logs, a dashboard and 7 alarms emailed through SNS; CloudTrail event history for auditing ([security review](security-review.md)).
@@ -50,7 +50,7 @@ The alert event is written to an `outbox_events` table in the same transaction a
 
 ### 2.6 CSV import
 
-Built now: a synchronous import of up to 10 MB that saves all rows or none (A42). Planned (INV-21, later stage): files go straight to S3 by presigned URL, so large files never pass through the API. The API returns `202 Accepted` with a job ID, and a worker processes the file from the SQS import-queue in batches. Each batch is its own transaction; invalid rows go to the error report and do not fail the file. Rows are upserted by SKU, which makes re-imports idempotent.
+Built now: a synchronous import of up to 10 MB that skips and reports bad rows and saves the valid ones in one transaction (A42). Planned (INV-21, later stage): files go straight to S3 by presigned URL, so large files never pass through the API. The API returns `202 Accepted` with a job ID, and a worker processes the file from the SQS import-queue in batches. Each batch is its own transaction; invalid rows go to the error report and do not fail the file. Rows are upserted by SKU, which makes re-imports idempotent.
 
 ### 2.7 Authentication
 
