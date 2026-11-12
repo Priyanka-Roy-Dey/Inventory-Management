@@ -1,6 +1,71 @@
 # InventoryApp
 
-A web application where staff track stock levels, record stock movements, import items from CSV, and get alerted when an item falls to its reorder level. It runs on AWS and is deployed by a GitHub Actions pipeline.
+A web application where staff track stock levels, record stock movements, import items from CSV, and see an alert when an item falls to its reorder level. It runs on AWS and is deployed by a GitHub Actions pipeline.
+
+**Live (sandbox):** https://d1v2v55o96jhmt.cloudfront.net. It may be scaled down to save cost; see [Deploying](#deploying).
+
+## Features
+
+- **Sign-in and roles:** Admin, Staff and Viewer, with JWT access and refresh tokens. A first-time or reset password must be changed before anything else.
+- **Items:** create, edit, search, filter (category, low stock, attributes, delivery pincode, price range), sort and page. Only an Admin can delete, and deleting keeps the SKU reserved.
+- **Stock movements:** stock in, stock out and adjustments with a reason, plus a history per item. A stock-out larger than the stock is refused, also when two people change stock at the same moment.
+- **Item images:** uploaded with a stock-in, straight from the browser to S3.
+- **Low-stock alerts:** recorded when a change takes an item to or below its reorder level, and listed on the Alerts page.
+- **CSV import:** create, update or restore items in bulk, with row-numbered errors for bad rows.
+- **Dashboard:** stock totals, low-stock count and recent movements.
+- **Users (Admin):** create users and reset passwords with one-time temporary passwords.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  user([Browser])
+  gh([GitHub Actions])
+
+  subgraph aws[AWS eu-north-1]
+    cf[CloudFront<br/>HTTPS]
+    web[(S3<br/>React build)]
+    images[(S3<br/>item images)]
+
+    subgraph vpc[VPC, 2 Availability Zones]
+      subgraph public[Public subnets]
+        alb[Application<br/>Load Balancer]
+        nat[NAT gateway]
+      end
+      subgraph private[Private subnets]
+        ecs[ECS Fargate<br/>Spring Boot API<br/>1 to 3 tasks]
+        rds[(RDS PostgreSQL<br/>encrypted)]
+      end
+    end
+
+    ecr[(ECR<br/>API image)]
+    sm[Secrets Manager<br/>+ KMS]
+    cw[CloudWatch<br/>logs, alarms, dashboard]
+    sns[SNS<br/>alarm email]
+  end
+
+  user -->|"/"| cf
+  user -->|"/api/*"| cf
+  cf -->|Origin Access Control| web
+  cf -->|HTTP| alb --> ecs
+  ecs --> rds
+  ecs -->|presigned URLs| images
+  user -.->|upload / view image| images
+  ecs -.->|via NAT| sm
+  ecr -.->|image pull| ecs
+  ecs -.-> cw --> sns
+  gh -->|"push image (OIDC role, after approval)"| ecr
+  gh -->|update service stack| ecs
+  gh -->|publish build| web
+```
+
+- The browser only talks to **CloudFront**: it serves the React app from a private bucket and forwards `/api/*` to the load balancer, so there is one HTTPS address and no CORS for the API.
+- The **API** and **database** sit in private subnets; only the load balancer is reachable from the internet, and only the API's security group can reach the database.
+- **Images** go straight between the browser and S3 through short-lived presigned URLs that the API issues.
+- **Secrets** (database credentials, JWT signing key, first Admin) come from Secrets Manager and are injected into the tasks.
+- **GitHub Actions** deploys with short-lived credentials from an OIDC role, only after a reviewer approves the `sandbox` environment.
+
+The decisions behind this, and what is planned but not built yet, are in the [design note](docs/design-note.md).
 
 ## Repository layout
 
@@ -8,15 +73,15 @@ A web application where staff track stock levels, record stock movements, import
 |---|---|
 | `api/` | Java 17 / Spring Boot REST API (PostgreSQL, JWT, OpenAPI) |
 | `web/` | React front end |
-| `infra/` | AWS infrastructure (CloudFormation templates, Lambda functions) |
-| `docs/` | Design note, backlog, architecture diagram, lessons learned |
+| `infra/` | AWS infrastructure as CloudFormation templates, one stack per concern |
+| `docs/` | Design note, backlog, lessons learned, security review |
 | `.github/` | CI/CD workflows and PR template |
 
 ## Tech stack
 
 - **Back end:** Java 17, Spring Boot, PostgreSQL, Flyway, Spring Security (JWT), springdoc-openapi
-- **Front end:** React (functional components and hooks), React Router
-- **AWS:** ECS Fargate, ALB, ECR, RDS, S3, CloudFront, SQS, SNS, Lambda, API Gateway, DynamoDB, Secrets Manager, KMS, CloudWatch, CloudTrail, CloudFormation, IAM
+- **Front end:** React (functional components and hooks), React Router, MUI, Vite, Vitest and Testing Library
+- **AWS:** ECS Fargate, ALB, ECR, RDS PostgreSQL, S3, CloudFront, Secrets Manager, KMS, CloudWatch, SNS, CloudTrail, CloudFormation, IAM, Application Auto Scaling. Planned: SQS, Lambda, API Gateway and DynamoDB for alerts ([design note](docs/design-note.md#4-deferred-work)).
 - **CI/CD:** GitHub Actions with OIDC to AWS
 
 ## Prerequisites
@@ -102,7 +167,7 @@ One-time setup (already done for this repository; needed again only for a fork):
 
 The app runs in AWS (`eu-north-1`) at the `WebUrl` output of the `inventory-frontend` stack (`https://<id>.cloudfront.net`). CloudFront serves the React build from S3 and sends `/api/*` to the API behind the load balancer.
 
-When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in the `sandbox` environment. It then rolls out the API image, publishes the web app and smoke-tests both. The stacks and the order to create them in are in [infra/README.md](infra/README.md).
+When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in the `sandbox` environment. It then builds the API image, stops on any HIGH or CRITICAL vulnerability, rolls the image out (a failed rollout is rolled back automatically), publishes the web app and smoke-tests both. The stacks, the order to create them in, and how to stop and start the API are in [infra/README.md](infra/README.md).
 
 ## Ways of working
 
