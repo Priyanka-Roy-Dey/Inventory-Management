@@ -21,8 +21,8 @@ Parameters:
     Default: 1
     MinValue: 0
     Description: >-
-      Number of API tasks to start with; autoscaling then keeps it between MinTasks and MaxTasks.
-      0 stops the API without deleting the stack, and turns autoscaling off.
+      0 stops the API without deleting the stack, and turns autoscaling off. Any other value runs it, and
+      autoscaling decides how many tasks, between MinTasks and MaxTasks.
   MinTasks:
     Type: Number
     Default: 1
@@ -220,7 +220,11 @@ Resources:
       Cluster: !Ref Cluster
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
-      DesiredCount: !Ref DesiredCount
+      # Set only to stop the API. Otherwise autoscaling owns the count: a fixed value here made every deploy reset
+      # a scaled-out service to that value (12 November, 09:45). Without it, CloudFormation starts a new service
+      # with 1 task and leaves the count alone on updates. After a stop, DesiredCount=1 raises autoscaling's minimum
+      # from 0 back to MinTasks, and autoscaling starts the tasks.
+      DesiredCount: !If [Stopped, 0, !Ref 'AWS::NoValue']
       # Flyway migrates and Spring starts before the first health check counts.
       HealthCheckGracePeriodSeconds: 120
       DeploymentConfiguration:
