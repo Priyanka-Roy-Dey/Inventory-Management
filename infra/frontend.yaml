@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp front end (INV-24): the React build in a private S3 bucket, served over HTTPS by CloudFront through
+  Origin Access Control. CloudFront also sends /api/* to the ALB, so the browser talks to one origin and needs no CORS
+  for the API. Needs the service stack. Deploy with --tags project=inventory; the files come from GitHub (deploy.yml).
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and imports; must match the other stacks.
+
+Resources:
+  # Holds only the build output, which the pipeline can always upload again.
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Project}-web-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      Tags: [{ Key: Name, Value: !Sub '${Project}-web' }]
+
+  # Only this distribution can read the bucket, and only over HTTPS.
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFrontReadsThroughOac
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: 's3:GetObject'
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: HttpsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt SiteBucket.Arn, !Sub '${SiteBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${Project}-web'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # React Router paths such as /items have no file in the bucket: serve index.html and let the app route.
+  # Not a 403/404 error page, which would also turn real API 404s into index.html.
+  SpaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${Project}-spa-rewrite'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Serve index.html for paths without a file extension
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var lastSegment = request.uri.substring(request.uri.lastIndexOf('/') + 1);
+          if (lastSegment.indexOf('.') === -1) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${Project} web app and API'
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        DefaultRootObject: index.html
+        # The default *.cloudfront.net certificate gives HTTPS without a domain of our own.
+        ViewerCertificate: { CloudFrontDefaultCertificate: true }
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref SiteOriginAccessControl
+            S3OriginConfig: { OriginAccessIdentity: '' }
+          - Id: api
+            # The ALB's DNS name, taken from the service stack's http://<dns> URL.
+            DomainName: !Select [2, !Split ['/', !ImportValue { 'Fn::Sub': '${Project}-api-url' }]]
+            CustomOriginConfig:
+              # The ALB only listens on HTTP until it has a certificate (service.yaml).
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03 # Managed-SecurityHeadersPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            Compress: true
+            # Never cache API answers; pass every header (Authorization included), cookie and query string on.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+      Tags: [{ Key: Name, Value: !Sub '${Project}-web' }]
+
+# Exported for the GitHub deploy role (github-deploy.yaml) and read by deploy.yml.
+Outputs:
+  SiteBucketName:
+    Value: !Ref SiteBucket
+    Export: { Name: !Sub '${Project}-web-bucket' }
+  SiteBucketArn:
+    Value: !GetAtt SiteBucket.Arn
+    Export: { Name: !Sub '${Project}-web-bucket-arn' }
+  DistributionId:
+    Value: !Ref Distribution
+    Export: { Name: !Sub '${Project}-web-distribution-id' }
+  WebUrl:
+    Description: The app's address; also the origin the images bucket allows (storage.yaml AllowedOrigin).
+    Value: !Sub 'https://${Distribution.DomainName}'
+    Export: { Name: !Sub '${Project}-web-url' }

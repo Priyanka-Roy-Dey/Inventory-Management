@@ -2,8 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   InventoryApp deploy access for GitHub Actions (INV-16): a role, trusted through the account's GitHub OIDC provider,
   that only jobs in the repository's sandbox environment can assume, with short-lived credentials and no stored keys. The role can push the
-  API image and update the image tag of the inventory-service stack, nothing else.
-  Deploy with --capabilities CAPABILITY_NAMED_IAM --tags project=inventory.
+  API image, update the image tag of the inventory-service stack and publish the web app (INV-24), nothing else.
+  Needs the registry and frontend stacks. Deploy with --capabilities CAPABILITY_NAMED_IAM --tags project=inventory.
 
 Parameters:
   Project:
@@ -100,6 +100,27 @@ Resources:
               - Effect: Allow
                 Action: elasticloadbalancing:DescribeLoadBalancers
                 Resource: '*'
+        - PolicyName: publish-web-app
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # deploy.yml reads the bucket and distribution from the frontend stack's outputs.
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${Project}-frontend/*'
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !ImportValue { 'Fn::Sub': '${Project}-web-bucket-arn' }
+              - Effect: Allow
+                Action: ['s3:PutObject', 's3:DeleteObject']
+                Resource: !Sub
+                  - '${BucketArn}/*'
+                  - BucketArn: !ImportValue { 'Fn::Sub': '${Project}-web-bucket-arn' }
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub
+                  - 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+                  - DistributionId: !ImportValue { 'Fn::Sub': '${Project}-web-distribution-id' }
       Tags: [{ Key: Name, Value: !Sub '${Project}-github-deploy' }]
 
 Outputs:
