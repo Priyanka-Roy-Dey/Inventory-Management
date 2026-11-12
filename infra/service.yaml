@@ -227,3 +227,10 @@ Outputs:
   LoadBalancerArn:
     Value: !Ref LoadBalancer
     Export: { Name: !Sub '${Project}-alb-arn' }
+  # CloudWatch names the load balancer and target group by these in metric dimensions (monitoring.yaml, INV-26).
+  LoadBalancerFullName:
+    Value: !GetAtt LoadBalancer.LoadBalancerFullName
+    Export: { Name: !Sub '${Project}-alb-full-name' }
+  TargetGroupFullName:
+    Value: !GetAtt TargetGroup.TargetGroupFullName
+    Export: { Name: !Sub '${Project}-api-tg-full-name' }

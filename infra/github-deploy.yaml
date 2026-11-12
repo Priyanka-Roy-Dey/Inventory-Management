@@ -95,10 +95,10 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Project}-api-execution'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Project}-api-task'
-              # CloudFormation reads the load balancer's DNS name for the ApiUrl output. Read-only, and this action
-              # cannot be limited to one load balancer.
+              # CloudFormation reads the load balancer and target group for the stack's outputs (ApiUrl, and the
+              # CloudWatch names monitoring.yaml uses). Read-only, and these actions cannot be limited to one resource.
               - Effect: Allow
-                Action: elasticloadbalancing:DescribeLoadBalancers
+                Action: ['elasticloadbalancing:DescribeLoadBalancers', 'elasticloadbalancing:DescribeTargetGroups']
                 Resource: '*'
         - PolicyName: publish-web-app
           PolicyDocument:

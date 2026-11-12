@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp monitoring (INV-26): CloudWatch alarms on the load balancer, API tasks and database, emailed through
+  an SNS topic, and a dashboard of the same metrics. Needs the database and service stacks.
+  Deploy with --tags project=inventory --parameter-overrides AlarmEmail=<address>, then confirm the email SNS sends.
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and imports; must match the other stacks.
+  # No default, so no address is stored in the repository.
+  AlarmEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: Address that receives alarm emails. SNS only sends them after the link in its first email is clicked.
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${Project}-alarms'
+      Subscription: [{ Protocol: email, Endpoint: !Ref AlarmEmail }]
+      Tags: [{ Key: Name, Value: !Sub '${Project}-alarms' }]
+
+  # CloudWatch publishes to the topic on behalf of this account's alarms only.
+  AlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlarmTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudwatch.amazonaws.com }
+            Action: 'sns:Publish'
+            Resource: !Ref AlarmTopic
+            Condition:
+              ArnLike: { 'aws:SourceArn': !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*' }
+
+  # The API answered with a server error. Any 5xx is a bug or an outage at this traffic.
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-api-5xx'
+      AlarmDescription: The API returned 5 or more 5xx responses in 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue { 'Fn::Sub': '${Project}-alb-full-name' }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # The load balancer itself answered 5xx: usually no healthy task to send the request to.
+  LoadBalancerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-alb-5xx'
+      AlarmDescription: The load balancer returned 5 or more 5xx responses in 5 minutes (502/503/504, no healthy API).
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue { 'Fn::Sub': '${Project}-alb-full-name' }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # Three minutes in a row, so a task being replaced during a deploy does not page anyone.
+  UnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-api-unhealthy-targets'
+      AlarmDescription: At least one API task failed its health check for 3 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue { 'Fn::Sub': '${Project}-alb-full-name' }
+        - Name: TargetGroup
+          Value: !ImportValue { 'Fn::Sub': '${Project}-api-tg-full-name' }
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  ApiCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-api-cpu-high'
+      AlarmDescription: API tasks averaged over 80% CPU for 10 minutes.
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      Dimensions:
+        - { Name: ClusterName, Value: !Ref Project }
+        - { Name: ServiceName, Value: !Sub '${Project}-api' }
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  ApiMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-api-memory-high'
+      AlarmDescription: API tasks averaged over 85% memory for 10 minutes.
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - { Name: ClusterName, Value: !Ref Project }
+        - { Name: ServiceName, Value: !Sub '${Project}-api' }
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-db-cpu-high'
+      AlarmDescription: The database averaged over 80% CPU for 15 minutes.
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          # The instance identifier is the first label of its endpoint address.
+          Value: !Select [0, !Split ['.', !ImportValue { 'Fn::Sub': '${Project}-db-endpoint' }]]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # 2 GB left of the 20 GB volume (database.yaml).
+  DatabaseStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-db-storage-low'
+      AlarmDescription: The database has less than 2 GB of free storage.
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Select [0, !Split ['.', !ImportValue { 'Fn::Sub': '${Project}-db-endpoint' }]]
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2147483648
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${Project}'
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {"type": "alarm", "x": 0, "y": 0, "width": 24, "height": 3,
+               "properties": {"title": "Alarms", "alarms": [
+                 "${ApiErrorsAlarm.Arn}", "${LoadBalancerErrorsAlarm.Arn}", "${UnhealthyTargetsAlarm.Arn}",
+                 "${ApiCpuAlarm.Arn}", "${ApiMemoryAlarm.Arn}", "${DatabaseCpuAlarm.Arn}", "${DatabaseStorageAlarm.Arn}"]}},
+              {"type": "metric", "x": 0, "y": 3, "width": 8, "height": 6,
+               "properties": {"title": "Requests", "region": "${AWS::Region}", "stat": "Sum", "period": 60,
+                 "metrics": [["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${AlbName}"]]}},
+              {"type": "metric", "x": 8, "y": 3, "width": 8, "height": 6,
+               "properties": {"title": "Response time (p95, seconds)", "region": "${AWS::Region}", "stat": "p95", "period": 60,
+                 "metrics": [["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${AlbName}"]]}},
+              {"type": "metric", "x": 16, "y": 3, "width": 8, "height": 6,
+               "properties": {"title": "Errors", "region": "${AWS::Region}", "stat": "Sum", "period": 60,
+                 "metrics": [["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${AlbName}", {"label": "API 5xx"}],
+                             ["AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", "${AlbName}", {"label": "Load balancer 5xx"}],
+                             ["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "${AlbName}", {"label": "API 4xx"}]]}},
+              {"type": "metric", "x": 0, "y": 9, "width": 8, "height": 6,
+               "properties": {"title": "Healthy and unhealthy API tasks", "region": "${AWS::Region}", "stat": "Maximum", "period": 60,
+                 "metrics": [["AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "${AlbName}", "TargetGroup", "${TargetGroupName}"],
+                             ["AWS/ApplicationELB", "UnHealthyHostCount", "LoadBalancer", "${AlbName}", "TargetGroup", "${TargetGroupName}"]]}},
+              {"type": "metric", "x": 8, "y": 9, "width": 8, "height": 6,
+               "properties": {"title": "API CPU and memory (%)", "region": "${AWS::Region}", "stat": "Average", "period": 60,
+                 "metrics": [["AWS/ECS", "CPUUtilization", "ClusterName", "${Project}", "ServiceName", "${Project}-api"],
+                             ["AWS/ECS", "MemoryUtilization", "ClusterName", "${Project}", "ServiceName", "${Project}-api"]]}},
+              {"type": "metric", "x": 16, "y": 9, "width": 8, "height": 6,
+               "properties": {"title": "Database CPU (%) and connections", "region": "${AWS::Region}", "stat": "Average", "period": 60,
+                 "metrics": [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${DatabaseId}"],
+                             ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${DatabaseId}", {"yAxis": "right"}]]}}
+            ]
+          }
+        - AlbName: !ImportValue { 'Fn::Sub': '${Project}-alb-full-name' }
+          TargetGroupName: !ImportValue { 'Fn::Sub': '${Project}-api-tg-full-name' }
+          DatabaseId: !Select [0, !Split ['.', !ImportValue { 'Fn::Sub': '${Project}-db-endpoint' }]]
+
+Outputs:
+  AlarmTopicArn:
+    Value: !Ref AlarmTopic
+    Export: { Name: !Sub '${Project}-alarm-topic-arn' }
+  DashboardUrl:
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${Project}'
