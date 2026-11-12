@@ -12,8 +12,10 @@ Parameters:
     Description: Prefix for resource names and imports; must match the other stacks.
   GitHubRepository:
     Type: String
-    Default: Priyanka-Roy-Dey/Inventory-Management
-    Description: owner/name of the repository whose workflows may deploy.
+    Default: Priyanka-Roy-Dey@36127173/Inventory-Management@1439440613
+    Description: >-
+      The repository as GitHub names it in the token's sub claim: owner@ownerId/name@repositoryId. The ids pin this
+      exact repository, so a re-created repository with the same name cannot deploy.
   GitHubEnvironment:
     Type: String
     Default: sandbox
