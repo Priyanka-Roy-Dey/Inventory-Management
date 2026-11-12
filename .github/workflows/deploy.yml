@@ -98,6 +98,8 @@ jobs:
               ParameterKey=JwtKeySecretArn,UsePreviousValue=true \
               ParameterKey=AdminSecretArn,UsePreviousValue=true \
               ParameterKey=DesiredCount,UsePreviousValue=true \
+              ParameterKey=MinTasks,UsePreviousValue=true \
+              ParameterKey=MaxTasks,UsePreviousValue=true \
               ParameterKey=Cpu,UsePreviousValue=true \
               ParameterKey=Memory,UsePreviousValue=true 2>&1)
           STATUS=$?

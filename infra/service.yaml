@@ -20,7 +20,19 @@ Parameters:
     Type: Number
     Default: 1
     MinValue: 0
-    Description: Number of API tasks; 0 stops the API without deleting the stack.
+    Description: >-
+      Number of API tasks to start with; autoscaling then keeps it between MinTasks and MaxTasks.
+      0 stops the API without deleting the stack, and turns autoscaling off.
+  MinTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Fewest API tasks autoscaling keeps running.
+  MaxTasks:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    Description: Most API tasks autoscaling may start.
   Cpu:
     Type: String
     Default: '512'
@@ -37,6 +49,10 @@ Parameters:
     Description: >-
       ARN of the secret holding the first Admin as JSON {"username", "password"} (A16). The API only creates
       this user if no Admin exists.
+
+Conditions:
+  # With DesiredCount 0, autoscaling must not start tasks again.
+  Stopped: !Equals [!Ref DesiredCount, '0']
 
 Resources:
   LogGroup:
@@ -218,6 +234,44 @@ Resources:
           SecurityGroups: [!ImportValue { 'Fn::Sub': '${Project}-app-sg' }]
       LoadBalancers:
         - { ContainerName: api, ContainerPort: 8080, TargetGroupArn: !Ref TargetGroup }
+
+  # INV-27: target tracking adds tasks when either CPU or requests per task stay above target, and removes them
+  # (more slowly) when both are back below. Uses the Application Auto Scaling service-linked role.
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub 'service/${Cluster}/${Service.Name}'
+      MinCapacity: !If [Stopped, 0, !Ref MinTasks]
+      MaxCapacity: !If [Stopped, 0, !Ref MaxTasks]
+
+  CpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${Project}-api-cpu'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+        TargetValue: 60
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
+
+  # Requests per task per minute, from the load balancer; reacts to traffic before CPU does.
+  RequestsScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${Project}-api-requests'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub '${LoadBalancer.LoadBalancerFullName}/${TargetGroup.TargetGroupFullName}'
+        TargetValue: 1000
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
 
 Outputs:
   ApiUrl:
