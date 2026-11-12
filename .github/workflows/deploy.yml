@@ -110,10 +110,11 @@ jobs:
             echo "$OUTPUT"
             exit $STATUS
           fi
-          # Fails if the ECS circuit breaker rolls the deployment back; then show why.
+          # Fails if the ECS circuit breaker rolls the deployment back; then show why. A failed resource says so on
+          # its own event; a failure outside any resource (an output, say) is only on the stack's rollback event.
           if ! aws cloudformation wait stack-update-complete --stack-name "$STACK"; then
             aws cloudformation describe-stack-events --stack-name "$STACK" --max-items 40 \
-              --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output text
+              --query "StackEvents[?contains(ResourceStatus,'FAILED') || ResourceStatus=='UPDATE_ROLLBACK_IN_PROGRESS'] | [:5].[LogicalResourceId,ResourceStatusReason]" --output text
             echo "::error::$STACK update failed and was rolled back; still running the previous image."
             exit 1
           fi
