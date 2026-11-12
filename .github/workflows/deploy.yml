@@ -61,7 +61,22 @@ jobs:
 
       - name: Stop on HIGH or CRITICAL vulnerabilities
         run: |
-          aws ecr wait image-scan-complete --repository-name "$REPOSITORY" --image-id imageTag="$TAG"
+          # Not `aws ecr wait image-scan-complete`: it gives up on the ScanNotFoundException ECR returns for a few
+          # seconds after a push, before the scan exists.
+          for attempt in $(seq 1 30); do
+            SCAN=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORY" --image-id imageTag="$TAG" \
+              --query 'imageScanStatus.status' --output text 2>&1) || SCAN="not started yet ($SCAN)"
+            case "$SCAN" in
+              COMPLETE) break ;;
+              FAILED|UNSUPPORTED_IMAGE) echo "::error::Scan of $TAG ended $SCAN; not deploying."; exit 1 ;;
+            esac
+            echo "Scan of $TAG: $SCAN"
+            sleep 10
+          done
+          if [ "$SCAN" != COMPLETE ]; then
+            echo "::error::Scan of $TAG did not complete within 5 minutes; not deploying."
+            exit 1
+          fi
           COUNTS=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORY" --image-id imageTag="$TAG" \
             --query 'imageScanFindings.findingSeverityCounts' --output json)
           echo "Scan findings: $COUNTS"
