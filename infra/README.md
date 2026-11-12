@@ -16,3 +16,5 @@ Deploy in this order from CloudShell (region `eu-north-1`), each with `--tags pr
 | `inventory-github-deploy` | `github-deploy.yaml` | GitHub deploy role, trusted through the account's existing GitHub OIDC provider; needs `--capabilities CAPABILITY_NAMED_IAM` (INV-16) |
 
 After the first deploy, `.github/workflows/deploy.yml` rolls out new images: when CI passes on `main` it waits for approval in the `sandbox` environment, builds and pushes the image, stops on HIGH or CRITICAL scan findings, updates only the `ImageTag` of `inventory-service` and checks `/actuator/health`. Changes to the templates themselves are deployed by hand.
+
+When you update a stack, `aws cloudformation deploy` keeps each parameter's previous value. If a template's parameter default changes, pass the new value with `--parameter-overrides`, or the stack keeps the old one.
