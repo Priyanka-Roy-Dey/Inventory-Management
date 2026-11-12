@@ -87,6 +87,18 @@ Deploy #2 was re-run once (attempt 2), and Deploy #6 twice (attempts 2 and 3), b
 2. Pull and deploy the stack (in CloudShell), then read the change back from AWS.
 3. Only then re-run the deploy.
 
+### Deploys undid autoscaling
+
+- **Symptom:** after a load test scaled the API out to 3 tasks (09:27), it was back at 1 task by 09:46, with no scale-in recorded by autoscaling.
+- **Diagnosis:** the ECS service events showed `has stopped 2 running tasks` at 09:45:47, and the deploy's new task starting at 09:47. That was Deploy #8, not autoscaling:
+  ```bash
+  aws ecs describe-services --cluster inventory --services inventory-api --query "services[0].events[].[createdAt,message]" --output text
+  aws application-autoscaling describe-scaling-activities --service-namespace ecs --resource-id service/inventory/inventory-api --include-not-scaled-activities
+  ```
+- **Root cause:** the service's `DesiredCount` was set from a parameter (1), so each stack update set the count back to 1, whatever autoscaling had chosen. Under real load, every deploy would have removed the extra capacity.
+- **Fix:** `DesiredCount` is now only set to stop the API (0). Otherwise it is left out, so CloudFormation leaves the count to autoscaling on updates.
+- **Autoscaling itself works:** a second load test scaled out to 3 tasks at 11:58, then back in to 2 at 12:17 and to 1 at 12:23, all recorded as `Successful`.
+
 ## Other incidents
 
 ### The first Admin's secret was deleted
