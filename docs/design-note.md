@@ -4,22 +4,24 @@ Key design decisions for InventoryApp and the reasons for them. Where the assign
 
 ## 1. Architecture overview
 
-- **Front end:** React build served from a private S3 bucket through CloudFront (Origin Access Control). CloudFront routes `/api/*` to the ALB, so the browser talks to a single domain.
-- **API:** Spring Boot on ECS Fargate (1–3 tasks, autoscaled, A46) behind an Application Load Balancer, image in ECR.
-- **Database:** RDS PostgreSQL in private subnets, reachable only from the ECS security group.
-- **Network:** VPC across 2 Availability Zones. Public subnets: ALB, NAT gateway. Private subnets: ECS tasks, RDS.
-- **Alerts:** stock movement transaction → outbox → SNS topic → email subscription (manager) and SQS alert-queue (+DLQ) → Lambda → DynamoDB. Alerts page reads history through API Gateway → Lambda → DynamoDB.
-- **CSV import:** presigned S3 upload → import job → SQS import-queue → worker in the API → row-by-row validation and upsert.
-- **Secrets:** Secrets Manager (DB credentials, JWT signing key, initial Admin), injected into ECS tasks. KMS encryption at rest.
-- **Monitoring:** CloudWatch logs, dashboard and alarms; CloudTrail for API auditing.
+The [architecture diagram](../README.md#architecture) is in the README. As built:
 
-_Architecture diagram: `docs/architecture.png` (INV-31)._
+- **Front end:** React build served from a private S3 bucket through CloudFront (Origin Access Control), over HTTPS on CloudFront's own address (A44). CloudFront routes `/api/*` to the ALB, so the browser talks to a single domain.
+- **API:** Spring Boot on ECS Fargate (1–3 tasks, autoscaled, A46) behind an Application Load Balancer, image in ECR.
+- **Database:** RDS PostgreSQL in private subnets, encrypted with KMS, reachable only from the ECS security group.
+- **Network:** VPC across 2 Availability Zones. Public subnets: ALB, NAT gateway. Private subnets: ECS tasks, RDS.
+- **Alerts:** a stock movement that crosses the reorder level writes an outbox event in the same transaction (2.5). The Alerts page reads those events from the API (A41). The SNS, SQS, Lambda and DynamoDB path is planned ([section 4](#4-deferred-work)).
+- **CSV import:** synchronous `POST /api/items/import`, checking every row and saving all of it or none (A42). The queued version is planned ([section 4](#4-deferred-work)).
+- **Item images:** uploaded and read straight from the browser to S3 through presigned URLs (A36).
+- **Secrets:** Secrets Manager (DB credentials, JWT signing key, initial Admin), injected into ECS tasks. KMS encryption at rest.
+- **Monitoring:** CloudWatch logs, a dashboard and 7 alarms emailed through SNS; CloudTrail event history for auditing ([security review](security-review.md)).
+- **Delivery:** GitHub Actions. CI on every pull request; deploy on merge to `main` after approval, with short-lived OIDC credentials, an image vulnerability gate and automatic rollback.
 
 ## 2. Key decisions
 
 ### 2.1 Fargate vs EC2
 
-_To be completed._ Starting position: Fargate. No servers to patch or scale, and you pay per task. EC2 is cheaper at steady high load but adds instance management, AMI patching and capacity planning. For a small app with variable load and one developer, the lower operational effort outweighs the cost difference.
+Fargate. No servers to patch or scale, and you pay per task. EC2 is cheaper at steady high load but adds instance management, AMI patching and capacity planning. For a small app with variable load and one developer, the lower operational effort outweighs the cost difference.
 
 ### 2.2 Concurrent stock adjustments
 
@@ -44,15 +46,15 @@ Creation (through the UI, API or CSV import) is treated as a crossing from "not 
 
 ### 2.5 Reliable alert delivery (outbox pattern)
 
-The alert event is written to an `outbox_events` table in the same transaction as the stock movement. A publisher sends unpublished events to SNS. This prevents a lost alert if the app crashes after the database commit. SQS delivery is at-least-once, so the Lambda writes to DynamoDB with a conditional put on `alertId` to stay idempotent. Failed messages go to a DLQ with a CloudWatch alarm.
+The alert event is written to an `outbox_events` table in the same transaction as the stock movement; this part is built. Planned (INV-17): a publisher sends unpublished events to SNS. This prevents a lost alert if the app crashes after the database commit. SQS delivery is at-least-once, so the Lambda writes to DynamoDB with a conditional put on `alertId` to stay idempotent. Failed messages go to a DLQ with a CloudWatch alarm.
 
 ### 2.6 CSV import
 
-Files go straight to S3 by presigned URL, so large files never pass through the API. The API returns `202 Accepted` with a job ID, and a worker processes the file from the SQS import-queue in batches. Each batch is its own transaction; invalid rows go to the error report and do not fail the file. Rows are upserted by SKU, which makes re-imports idempotent.
+Built now: a synchronous import of up to 10 MB that saves all rows or none (A42). Planned (INV-21, later stage): files go straight to S3 by presigned URL, so large files never pass through the API. The API returns `202 Accepted` with a job ID, and a worker processes the file from the SQS import-queue in batches. Each batch is its own transaction; invalid rows go to the error report and do not fail the file. Rows are upserted by SKU, which makes re-imports idempotent.
 
 ### 2.7 Authentication
 
-JWTs issued by the API (Spring Security), signed with RS256. The private key is in Secrets Manager; the public key is published at a JWKS endpoint so API Gateway can verify tokens without sharing a secret. Passwords are hashed with BCrypt.
+JWTs issued by the API (Spring Security), signed with RS256. The private key is in Secrets Manager; the public key is published at a JWKS endpoint, so API Gateway (planned, INV-19) can verify tokens without sharing a secret. Passwords are hashed with BCrypt.
 
 ## 3. Assumption log
 
@@ -104,3 +106,19 @@ JWTs issued by the API (Spring Security), signed with RS256. The private key is 
 | A44 | The web app is served at CloudFront's own `https://<id>.cloudfront.net` address with its default certificate; CloudFront calls the ALB over HTTP. Paths without a file extension get `index.html` (a CloudFront Function), so React Router handles them; `/api/*` is never cached and passes every header through. Hashed `assets/` files are cached for a year, `index.html` is re-checked on every load, and the images bucket's CORS allows only the CloudFront origin. | No custom domain for the assignment, so no certificate of our own; HTTPS from browser to CloudFront covers tokens and passwords on the public internet. A rewrite rather than a 404 error page keeps real API 404s intact. |
 | A45 | `main` is protected by a GitHub ruleset with no bypass: pull requests only, the three CI checks must pass on the latest commit, conversations resolved, no force push or deletion. Required approvals are 0 while the project has one developer. | GitHub does not let an author approve their own pull request, so 1 required approval would mean bypassing every rule to merge, checks included. The checks are what actually block a broken change; a second reviewer is added when there is one. |
 | A46 | The API runs 1 to 3 tasks. Target tracking adds a task when average CPU stays above 60% or requests stay above 1,000 per task per minute, and removes one when both are back below (5-minute cool-down). Deploys are rolling (100% stay healthy, up to 200% during the switch) with the ECS circuit breaker rolling a failed deploy back. `DesiredCount=0` stops the API and turns autoscaling off. | One task is enough for sandbox traffic and keeps cost down; a second starts under load. Two triggers because requests rise before CPU does. Scaling in slowly avoids flapping. |
+
+## 4. Deferred work
+
+Not built within the assignment's time, in the order they would be done next. Each one has a working stand-in, so no feature in the demo depends on it.
+
+| Ticket | What | Stand-in today | Why deferred |
+|---|---|---|---|
+| INV-17 | SNS topic, SQS alert queue with a dead-letter queue, outbox publisher, email to the manager | Outbox events are recorded and shown on the Alerts page (A41) | The rest of the platform (HTTPS front end, deploys, monitoring, security review) mattered more for a running, supportable app |
+| INV-18 | Lambda that records alerts in DynamoDB, idempotently | Same as above | Depends on INV-17 |
+| INV-19 | API Gateway with a JWT authorizer and a Lambda behind `GET /alerts` | `GET /api/alerts` on the API (A41) | Depends on INV-18 |
+| INV-21 (later stage) | Import through a presigned S3 upload, an import job and a queue-driven worker | Synchronous import up to 10 MB / 50,000 rows (A42) | The synchronous version meets the acceptance test; the queue adds most value for much larger files |
+| INV-25 | Refactor one module (shared stock-movement domain service) | Current code, covered by tests | No behaviour change; lower priority than shipping |
+| INV-30 | 10,000-item seed, k6 p95 latency, Lighthouse | Indexes for the list's filters (V9) and the CloudWatch dashboard's p95 | Needs a stable deployed app first, which exists now |
+
+Also open, from the [security review](security-review.md#actions): a CloudTrail trail, an account password policy and IAM Access Analyzer.
+
