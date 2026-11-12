@@ -107,6 +107,8 @@ When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in t
 ## Ways of working
 
 - Never commit directly to `main`. Every change goes through a feature branch and a pull request.
+- GitHub enforces this with the `main` ruleset (Settings → Rules → Rulesets): no direct pushes, force pushes or deletion. A pull request can only merge when `Web - lint, test, build`, `API - test and build` and `SonarCloud - quality gate` have passed on its latest commit, and all review conversations are resolved. Nobody can bypass it, not even the repository owner.
+- Reviews: the project has one developer, and GitHub does not let authors approve their own pull requests, so the ruleset requires 0 approvals. Instead, every pull request gets a self-review against its checklist. Raise it to 1 when a second person joins.
 - Branch names: `feature/INV-<n>-short-description` (or `fix/`, `chore/`).
 - Commit messages: `INV-<n>: Short imperative summary`, for example `INV-12: Add reorder-level validation`.
 - No passwords, keys or tokens in code, commits or screenshots.
