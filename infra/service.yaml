@@ -186,7 +186,8 @@ Resources:
       TargetGroupAttributes:
         - { Key: deregistration_delay.timeout_seconds, Value: '30' }
 
-  # HTTP only until CloudFront adds HTTPS in front of it (INV-24); there is no domain for a certificate yet.
+  # HTTP only: browsers reach the API over HTTPS through CloudFront (frontend.yaml), which calls the ALB over HTTP.
+  # There is no domain for a certificate of our own yet.
   HttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:

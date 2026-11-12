@@ -100,7 +100,9 @@ One-time setup (already done for this repository; needed again only for a fork):
 
 ## Deploying
 
-_To be completed in INV-16 / INV-24._
+The app runs in AWS (`eu-north-1`) at the `WebUrl` output of the `inventory-frontend` stack (`https://<id>.cloudfront.net`). CloudFront serves the React build from S3 and sends `/api/*` to the API behind the load balancer.
+
+When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in the `sandbox` environment. It then rolls out the API image, publishes the web app and smoke-tests both. The stacks and the order to create them in are in [infra/README.md](infra/README.md).
 
 ## Ways of working
 

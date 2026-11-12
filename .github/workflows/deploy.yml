@@ -25,11 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: sandbox
-      url: ${{ steps.smoke.outputs.api_url }}
+      url: ${{ steps.web.outputs.web_url }}
     env:
       AWS_REGION: eu-north-1
       REPOSITORY: inventory-api
       STACK: inventory-service
+      WEB_STACK: inventory-frontend
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Check out the commit CI tested
@@ -132,3 +133,46 @@ jobs:
           done
           echo "::error::$API_URL/actuator/health did not report UP"
           exit 1
+
+      # INV-24: the web app goes out after the API it calls is up.
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish the web app to S3 and CloudFront
+        id: web
+        run: |
+          output() {
+            aws cloudformation describe-stacks --stack-name "$WEB_STACK" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          BUCKET=$(output SiteBucketName)
+          DISTRIBUTION_ID=$(output DistributionId)
+          WEB_URL=$(output WebUrl)
+          echo "web_url=$WEB_URL" >> "$GITHUB_OUTPUT"
+          # Asset names change with their content, so browsers may keep them, and old ones stay for pages still open;
+          # index.html must be re-checked every time.
+          aws s3 sync web/dist/assets "s3://$BUCKET/assets" --cache-control "public, max-age=31536000, immutable"
+          aws s3 sync web/dist "s3://$BUCKET" --delete --exclude "assets/*" --cache-control "no-cache"
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/index.html" "/" > /dev/null
+
+      - name: Smoke test through CloudFront
+        run: |
+          WEB_URL="${{ steps.web.outputs.web_url }}"
+          curl -fsS "$WEB_URL/" | grep -q '<div id="root">'
+          # /api/* must reach the API: without a token it answers 401, not CloudFront's or S3's 403/404.
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$WEB_URL/api/items")
+          if [ "$STATUS" != 401 ]; then
+            echo "::error::$WEB_URL/api/items returned $STATUS, expected 401 from the API"
+            exit 1
+          fi
+          echo "Web app and API are up at $WEB_URL"

@@ -13,8 +13,9 @@ Parameters:
     Type: String
     Default: '*'
     Description: >-
-      Browser origin allowed to upload and read images. Presigned URLs are what authorise each request;
-      narrow this to the CloudFront address in INV-24.
+      Browser origin allowed to upload and read images: the frontend stack's WebUrl output (https://....cloudfront.net).
+      Presigned URLs are what authorise each request. A parameter rather than an import, because the front end
+      depends on the service, which depends on this stack.
 
 Resources:
   ImagesBucket:
