@@ -12,7 +12,7 @@ Deploy in this order from CloudShell (region `eu-north-1`), each with `--tags pr
 | `inventory-database` | `database.yaml` | RDS Postgres, Secrets Manager, KMS (INV-14) |
 | `inventory-registry` | `registry.yaml` | ECR repository for the API image (INV-15) |
 | `inventory-storage` | `storage.yaml` | Images bucket; kept when the service is deleted (INV-15) |
-| `inventory-service` | `service.yaml` | ALB and ECS service; needs `--capabilities CAPABILITY_NAMED_IAM`, `ImageTag`, `JwtKeySecretArn` and `AdminSecretArn` (secrets `inventory/jwt-key` and `inventory/first-admin`, created once by hand) (INV-15) |
+| `inventory-service` | `service.yaml` | ALB and ECS service, autoscaled between `MinTasks` (1) and `MaxTasks` (3) (INV-27); needs `--capabilities CAPABILITY_NAMED_IAM`, `ImageTag`, `JwtKeySecretArn` and `AdminSecretArn` (secrets `inventory/jwt-key` and `inventory/first-admin`, created once by hand) (INV-15) |
 | `inventory-frontend` | `frontend.yaml` | S3 bucket for the React build, CloudFront with HTTPS; `/api/*` goes to the ALB. Afterwards, update `inventory-storage` with `--parameter-overrides AllowedOrigin=<WebUrl output>` (INV-24) |
 | `inventory-monitoring` | `monitoring.yaml` | CloudWatch alarms (API and load balancer 5xx, unhealthy tasks, API CPU and memory, database CPU and storage) emailed through SNS, and the `inventory` dashboard; needs `--parameter-overrides AlarmEmail=<address>`, then the SNS confirmation link clicked (INV-26) |
 | `inventory-github-deploy` | `github-deploy.yaml` | GitHub deploy role, trusted through the account's existing GitHub OIDC provider; needs `--capabilities CAPABILITY_NAMED_IAM` and the frontend stack (INV-16, INV-24) |
@@ -28,3 +28,9 @@ aws cloudwatch set-alarm-state --alarm-name inventory-api-5xx --state-value ALAR
 ```
 
 There is no dead-letter-queue alarm yet, because there is no queue until INV-17.
+
+To stop the API without deleting anything (for example overnight), set the task count to 0; autoscaling then stays off. Set it back to 1 to start again:
+
+```bash
+aws cloudformation deploy --stack-name inventory-service --template-file service.yaml --capabilities CAPABILITY_NAMED_IAM --tags project=inventory --parameter-overrides DesiredCount=0
+```

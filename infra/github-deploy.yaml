@@ -101,6 +101,11 @@ Resources:
               - Effect: Allow
                 Action: 'elasticloadbalancing:Describe*'
                 Resource: '*'
+              # The same for the autoscaling target and policies (INV-27), which CloudFormation reads when the stack
+              # changes. Read-only; changing them stays a manual deploy.
+              - Effect: Allow
+                Action: ['application-autoscaling:DescribeScalableTargets', 'application-autoscaling:DescribeScalingPolicies']
+                Resource: '*'
         - PolicyName: publish-web-app
           PolicyDocument:
             Version: '2012-10-17'
