@@ -109,8 +109,13 @@ jobs:
             echo "$OUTPUT"
             exit $STATUS
           fi
-          # Fails if the ECS circuit breaker rolls the deployment back.
-          aws cloudformation wait stack-update-complete --stack-name "$STACK"
+          # Fails if the ECS circuit breaker rolls the deployment back; then show why.
+          if ! aws cloudformation wait stack-update-complete --stack-name "$STACK"; then
+            aws cloudformation describe-stack-events --stack-name "$STACK" --max-items 40 \
+              --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output text
+            echo "::error::$STACK update failed and was rolled back; still running the previous image."
+            exit 1
+          fi
 
       - name: Smoke test through the load balancer
         id: smoke

@@ -89,6 +89,12 @@ Resources:
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Project}-api-task'
                 Condition:
                   StringEquals: { 'iam:PassedToService': ecs-tasks.amazonaws.com }
+              # CloudFormation reads the roles to resolve !GetAtt ...Arn for the new task definition.
+              - Effect: Allow
+                Action: iam:GetRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Project}-api-execution'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Project}-api-task'
       Tags: [{ Key: Name, Value: !Sub '${Project}-github-deploy' }]
 
 Outputs:
