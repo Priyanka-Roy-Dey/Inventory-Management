@@ -117,3 +117,4 @@ When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in t
 
 - [Design note](docs/design-note.md)
 - [Backlog](docs/backlog.md)
+- [Lessons learned](docs/lessons-learned.md), including the failed deployment exercise (INV-28)
