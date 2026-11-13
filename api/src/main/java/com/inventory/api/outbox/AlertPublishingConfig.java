@@ -1,10 +1,12 @@
 package com.inventory.api.outbox;
 
+import java.time.Duration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sns.SnsClient;
 
@@ -21,7 +23,11 @@ public class AlertPublishingConfig {
 
 	@Bean
 	SnsClient snsClient(AlertPublishingProperties properties) {
-		return SnsClient.builder().region(Region.of(properties.region())).build();
+		return SnsClient.builder()
+			.region(Region.of(properties.region()))
+			// The publisher holds the events' row locks during the call: fail and retry rather than wait forever.
+			.overrideConfiguration(ClientOverrideConfiguration.builder().apiCallTimeout(Duration.ofSeconds(10)).build())
+			.build();
 	}
 
 }

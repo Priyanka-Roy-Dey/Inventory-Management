@@ -54,6 +54,7 @@ public class OutboxPublisher {
 		this.jdbc = jdbc;
 		this.sns = sns;
 		this.properties = properties;
+		log.info("Publishing outbox events to {}", properties.topicArn());
 	}
 
 	record PendingEvent(long id, String eventType, String payload) {
@@ -79,6 +80,9 @@ public class OutboxPublisher {
 			}
 			jdbc.sql("UPDATE outbox_events SET published_at = now() WHERE id = :id").param("id", event.id()).update();
 			sent++;
+		}
+		if (sent > 0) {
+			log.info("Published {} of {} pending outbox events", sent, pending.size());
 		}
 		return sent;
 	}
