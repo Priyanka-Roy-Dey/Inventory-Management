@@ -37,7 +37,7 @@ What this means:
 | Page | Performance (≥ 80) | Accessibility (≥ 90) | Best practices | Notes |
 |---|---|---|---|---|
 | Sign-in (`/login`) | _to fill_ | _to fill_ | _to fill_ | |
-| Items (`/items`, signed in) | _to fill_ | _to fill_ | _to fill_ | |
+| Items (`/items`, signed in) | 94 ✓ | 96 ✓ | 92 | SEO 90 |
 
 ## How it was measured
 

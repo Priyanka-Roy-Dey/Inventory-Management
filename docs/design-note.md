@@ -68,7 +68,7 @@ JWTs issued by the API (Spring Security), signed with RS256. The private key is 
 | A6 | A missing required header rejects the whole file. A row with the wrong field count or an empty/invalid required value goes to the error report. Required columns: `sku, name, category, quantity, reorder_level, unit_price`. | Manager default. |
 | A7 | Soft delete, Admin only. The SKU stays reserved (create returns `409`); a CSV row with that SKU restores and updates the item. Deleted items are excluded from the list, dashboard totals and alerts. | Manager default. |
 | A8 | Import limit: 10 MB or 50,000 rows; larger files are rejected with a clear message. | Manager default. |
-| A9 | WCAG 2.1 AA basics; Lighthouse accessibility ≥ 90 and performance ≥ 80; item list p95 < 500 ms with about 10,000 items. | Manager default. |
+| A9 | WCAG 2.1 AA basics; Lighthouse accessibility ≥ 90 and performance ≥ 80; item list p95 < 500 ms with about 10,000 items. | Manager default. Measured in INV-30 ([performance](performance.md)): met with 10,000 items once autoscaling has added tasks; one 0.5 vCPU task alone misses the p95 under 20 users without pauses. |
 | A10 | Own JWTs (Spring Security), own user table, BCrypt. No external identity provider. | Manager default. |
 | A11 | Local plus one AWS sandbox environment. The sandbox deploy sits behind a GitHub Environment approval gate to demonstrate the requirement. | Manager default; the gate still shows the CI/CD outcome. |
 | A12 | Alert history lives in DynamoDB, served by API Gateway and Lambda. Items, movements, auth, dashboard and CSV import stay in Spring Boot on ECS with RDS. | Manager default. |
@@ -118,7 +118,6 @@ Not built within the assignment's time, in the order they would be done next. Ea
 | INV-19 | API Gateway with a JWT authorizer and a Lambda behind `GET /alerts`, reading the DynamoDB alerts table | `GET /api/alerts` on the API (A41) | The alert pipeline (INV-17, INV-18) came first; the Alerts page already works |
 | INV-21 (later stage) | Import through a presigned S3 upload, an import job and a queue-driven worker | Synchronous import up to 10 MB / 50,000 rows (A42) | The synchronous version meets the acceptance test; the queue adds most value for much larger files |
 | INV-25 | Refactor one module (shared stock-movement domain service) | Current code, covered by tests | No behaviour change; lower priority than shipping |
-| INV-30 | 10,000-item seed, k6 p95 latency, Lighthouse | Indexes for the list's filters (V9) and the CloudWatch dashboard's p95 | Needs a stable deployed app first, which exists now |
 
 Also open, from the [security review](security-review.md#actions): a CloudTrail trail, an account password policy and IAM Access Analyzer.
 
