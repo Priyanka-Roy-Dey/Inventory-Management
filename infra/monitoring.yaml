@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   InventoryApp monitoring (INV-26): CloudWatch alarms on the load balancer, API tasks and database, emailed through
-  an SNS topic, and a dashboard of the same metrics. Needs the database and service stacks.
+  an SNS topic, and a dashboard of the same metrics. Needs the database, service and alerts stacks.
   Deploy with --tags project=inventory --parameter-overrides AlarmEmail=<address>, then confirm the email SNS sends.
 
 Parameters:
@@ -178,6 +178,26 @@ Resources:
       AlarmActions: [!Ref AlarmTopic]
       OKActions: [!Ref AlarmTopic]
 
+  # INV-17: any message in the dead-letter queue is a low-stock alert that was not recorded.
+  AlertDeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Project}-alert-dlq-not-empty'
+      AlarmDescription: A low-stock alert failed 5 times and is in the dead-letter queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !ImportValue { 'Fn::Sub': '${Project}-alert-dlq-name' }
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
   Dashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -189,7 +209,8 @@ Resources:
               {"type": "alarm", "x": 0, "y": 0, "width": 24, "height": 3,
                "properties": {"title": "Alarms", "alarms": [
                  "${ApiErrorsAlarm.Arn}", "${LoadBalancerErrorsAlarm.Arn}", "${UnhealthyTargetsAlarm.Arn}",
-                 "${ApiCpuAlarm.Arn}", "${ApiMemoryAlarm.Arn}", "${DatabaseCpuAlarm.Arn}", "${DatabaseStorageAlarm.Arn}"]}},
+                 "${ApiCpuAlarm.Arn}", "${ApiMemoryAlarm.Arn}", "${DatabaseCpuAlarm.Arn}", "${DatabaseStorageAlarm.Arn}",
+                 "${AlertDeadLetterAlarm.Arn}"]}},
               {"type": "metric", "x": 0, "y": 3, "width": 8, "height": 6,
                "properties": {"title": "Requests", "region": "${AWS::Region}", "stat": "Sum", "period": 60,
                  "metrics": [["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${AlbName}"]]}},

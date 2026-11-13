@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  InventoryApp low-stock alerts (INV-17, INV-18): the API publishes each outbox event to an SNS topic, which emails
+  the manager and fans out to an SQS queue. A Lambda records each alert once in DynamoDB. Messages that keep failing move to a
+  dead-letter queue, which monitoring.yaml alarms on. Needs no other stack; the service and monitoring stacks
+  import from it.
+  Deploy with --tags project=inventory --parameter-overrides AlertEmail=<address>, then confirm the email SNS sends.
+
+Parameters:
+  Project:
+    Type: String
+    Default: inventory
+    Description: Prefix for resource names and imports; must match the other stacks.
+  # No default, so no address is stored in the repository.
+  AlertEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: The manager's address for low-stock emails. SNS only sends them after its confirmation link is clicked.
+
+Resources:
+  LowStockTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${Project}-low-stock'
+      Tags: [{ Key: Name, Value: !Sub '${Project}-low-stock' }]
+
+  # Gets the "email" text of each message (OutboxPublisher).
+  ManagerEmail:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref LowStockTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # Kept 14 days, the longest SQS allows, to give time to look at what failed.
+  AlertDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-alert-dlq'
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags: [{ Key: Name, Value: !Sub '${Project}-alert-dlq' }]
+
+  AlertQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Project}-alert-queue'
+      # Six times the recorder's 10-second timeout (INV-18), as AWS recommends for Lambda.
+      VisibilityTimeout: 60
+      SqsManagedSseEnabled: true
+      # After 5 failed attempts a message moves to the dead-letter queue instead of being retried forever.
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AlertDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags: [{ Key: Name, Value: !Sub '${Project}-alert-queue' }]
+
+  # Raw delivery: the queue gets the outbox event's JSON itself, not wrapped in an SNS envelope.
+  QueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref LowStockTopic
+      Protocol: sqs
+      Endpoint: !GetAtt AlertQueue.Arn
+      RawMessageDelivery: true
+
+  # Only this topic may send to the queue.
+  AlertQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref AlertQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: sns.amazonaws.com }
+            Action: 'sqs:SendMessage'
+            Resource: !GetAtt AlertQueue.Arn
+            Condition:
+              ArnEquals: { 'aws:SourceArn': !Ref LowStockTopic }
+
+  # INV-18: one record per alert. The outbox event's id is the key, so a message delivered twice is stored once.
+  AlertTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${Project}-alerts'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: alertId, AttributeType: S }]
+      KeySchema: [{ AttributeName: alertId, KeyType: HASH }]
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      Tags: [{ Key: Name, Value: !Sub '${Project}-alerts' }]
+
+  AlertRecorderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Project}-alert-recorder'
+      RetentionInDays: 14
+
+  # Reads the alert queue, writes the alerts table, writes its logs; nothing else.
+  AlertRecorderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-alert-recorder'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: record-alerts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:GetQueueAttributes']
+                Resource: !GetAtt AlertQueue.Arn
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt AlertTable.Arn
+              - Effect: Allow
+                Action: ['logs:CreateLogStream', 'logs:PutLogEvents']
+                Resource: !GetAtt AlertRecorderLogGroup.Arn
+
+  # The code is tested by infra/tests/test_alert_recorder.py, which runs this exact text.
+  AlertRecorder:
+    Type: AWS::Lambda::Function
+    DependsOn: AlertRecorderLogGroup
+    Properties:
+      FunctionName: !Sub '${Project}-alert-recorder'
+      Description: Records each low-stock alert from the queue in DynamoDB, once (INV-18).
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 10
+      Role: !GetAtt AlertRecorderRole.Arn
+      LoggingConfig: { LogGroup: !Ref AlertRecorderLogGroup }
+      Environment:
+        Variables: { TABLE_NAME: !Ref AlertTable }
+      Code:
+        ZipFile: |
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          TABLE = None
+          FIELDS = ("itemId", "sku", "name", "quantity", "reorderLevel", "cause", "occurredAt")
+
+
+          def table():
+              global TABLE
+              if TABLE is None:
+                  import boto3
+                  TABLE = boto3.resource("dynamodb").Table(os.environ["TABLE_NAME"])
+              return TABLE
+
+
+          def record(alert):
+              item = {"alertId": alert["eventId"], "recordedAt": datetime.now(timezone.utc).isoformat()}
+              item.update({field: alert[field] for field in FIELDS})
+              try:
+                  table().put_item(Item=item, ConditionExpression="attribute_not_exists(alertId)")
+              except Exception as error:
+                  code = getattr(error, "response", {}).get("Error", {}).get("Code")
+                  if code != "ConditionalCheckFailedException":
+                      raise
+                  # Already recorded: SQS and the outbox publisher deliver at least once.
+                  print(json.dumps({"duplicate": alert["eventId"]}))
+
+
+          def handler(event, context):
+              # Only the messages that failed are retried; after 5 tries SQS moves them to the dead-letter queue.
+              failures = []
+              for message in event["Records"]:
+                  try:
+                      record(json.loads(message["body"]))
+                  except Exception as error:
+                      print(json.dumps({"failed": message["messageId"], "error": repr(error)}))
+                      failures.append({"itemIdentifier": message["messageId"]})
+              return {"batchItemFailures": failures}
+
+  AlertQueueTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Ref AlertRecorder
+      EventSourceArn: !GetAtt AlertQueue.Arn
+      BatchSize: 10
+      FunctionResponseTypes: [ReportBatchItemFailures]
+
+Outputs:
+  LowStockTopicArn:
+    Description: The API publishes outbox events here (service.yaml, INVENTORY_ALERTS_TOPICARN).
+    Value: !Ref LowStockTopic
+    Export: { Name: !Sub '${Project}-low-stock-topic-arn' }
+  AlertQueueArn:
+    Value: !GetAtt AlertQueue.Arn
+    Export: { Name: !Sub '${Project}-alert-queue-arn' }
+  AlertQueueUrl:
+    Value: !Ref AlertQueue
+    Export: { Name: !Sub '${Project}-alert-queue-url' }
+  AlertDeadLetterQueueUrl:
+    Value: !Ref AlertDeadLetterQueue
+  AlertDeadLetterQueueName:
+    Description: monitoring.yaml alarms when this queue is not empty.
+    Value: !GetAtt AlertDeadLetterQueue.QueueName
+    Export: { Name: !Sub '${Project}-alert-dlq-name' }
+  AlertTableName:
+    Value: !Ref AlertTable
+    Export: { Name: !Sub '${Project}-alerts-table' }
+  AlertTableArn:
+    Value: !GetAtt AlertTable.Arn
+    Export: { Name: !Sub '${Project}-alerts-table-arn' }

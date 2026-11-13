@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   InventoryApp API service (INV-15): public ALB -> ECS Fargate tasks in private subnets, CloudWatch logs,
-  secrets injected from Secrets Manager. Needs the network, database, registry and storage stacks.
+  secrets injected from Secrets Manager. Needs the network, database, registry, storage and alerts stacks.
   Deploy with --capabilities CAPABILITY_NAMED_IAM --tags project=inventory; later image updates come from GitHub (INV-16).
 
 Parameters:
@@ -96,7 +96,7 @@ Resources:
                 Action: kms:Decrypt
                 Resource: !ImportValue { 'Fn::Sub': '${Project}-db-key-arn' }
 
-  # Used by the API code: the images bucket and nothing else.
+  # Used by the API code: the images bucket and the low-stock topic, nothing else.
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -121,6 +121,14 @@ Resources:
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !ImportValue { 'Fn::Sub': '${Project}-images-bucket-arn' }
+        # INV-17: the outbox publisher sends low-stock events to this topic only.
+        - PolicyName: publish-low-stock-alerts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !ImportValue { 'Fn::Sub': '${Project}-low-stock-topic-arn' }
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -153,6 +161,11 @@ Resources:
             - Name: INVENTORY_IMAGES_BUCKET
               Value: !ImportValue { 'Fn::Sub': '${Project}-images-bucket' }
             - Name: INVENTORY_IMAGES_REGION
+              Value: !Ref AWS::Region
+            # INV-17: with a topic set, the API publishes outbox events to it (OutboxPublisher).
+            - Name: INVENTORY_ALERTS_TOPICARN
+              Value: !ImportValue { 'Fn::Sub': '${Project}-low-stock-topic-arn' }
+            - Name: INVENTORY_ALERTS_REGION
               Value: !Ref AWS::Region
           Secrets:
             - Name: SPRING_DATASOURCE_USERNAME
