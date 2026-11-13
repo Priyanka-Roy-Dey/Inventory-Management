@@ -17,6 +17,11 @@ curl -s $(aws cloudformation describe-stacks --stack-name inventory-service --qu
 
 - [ ] It prints `{"status":"UP"}`, and https://d1v2v55o96jhmt.cloudfront.net shows the sign-in page.
 - [ ] Every CloudWatch alarm is `OK` (CloudWatch → Alarms).
+- [ ] Both email subscriptions are confirmed (alarms and low stock):
+  ```bash
+  aws sns list-subscriptions --query "Subscriptions[?Protocol=='email'].[TopicArn,SubscriptionArn]" --output text
+  ```
+  Neither line may say `PendingConfirmation`.
 
 ### Demo data
 - [ ] Sign in as Admin. Under **Users**, create `demo-staff` (Staff) and `demo-viewer` (Viewer). Keep their one-time passwords for the demo, but not in any file or screenshot.
@@ -29,7 +34,8 @@ curl -s $(aws cloudformation describe-stacks --stack-name inventory-service --qu
 1. The app: https://d1v2v55o96jhmt.cloudfront.net
 2. GitHub: the repository's README (architecture diagram), and **Actions**
 3. CloudWatch → Dashboards → `inventory`
-4. Your mailbox, for the alarm email
+4. Your mailbox, for the low-stock and alarm emails
+5. CloudShell, for the DynamoDB check in step 8
 
 ## 2. Demo script
 
@@ -43,8 +49,8 @@ curl -s $(aws cloudformation describe-stacks --stack-name inventory-service --qu
 | 4 | Create an item; then try the same SKU again | Validation; a duplicate SKU is refused (`409`) |
 | 5 | On `DEMO-1`, **stock in** with the image | The image goes straight from the browser to S3 through a presigned URL, and shows on the Items page |
 | 6 | **Stock out** more than the item holds | Refused with a clear message: stock never goes below 0, even when two people change it at the same moment (one atomic update, design note 2.2) |
-| 7 | **Stock out** 3 from `DEMO-1` (12 → 9) | It crossed its reorder level of 10, so an alert is recorded in the same transaction (outbox) |
-| 8 | **Alerts** | The new alert. Another stock-out while it stays low adds no second alert (design note 2.3) |
+| 7 | **Stock out** from `DEMO-1` down to 9 (if step 5 added 5 units, stock out 8) | It crossed its reorder level of 10, so an alert is recorded in the same transaction (outbox) |
+| 8 | **Alerts**, then your mailbox, then DynamoDB (command below) | The alert is on the page at once. Within seconds the API publishes it to SNS: the "Low stock: DEMO-1" email arrives, and the Lambda records it once in DynamoDB. Another stock-out while it stays low adds no second alert (design note 2.3) |
 | 9 | **Import**: upload the sample CSV | 3 imported, 2 errors with their row numbers; bad rows are skipped, good ones are saved |
 | 10 | Sign out; sign in as `demo-viewer` with its one-time password | Forced password change first; then read-only: no create, edit or stock buttons, and the API answers `403` if tried |
 | 11 | Sign in as Admin; delete an item | Only an Admin can delete. The item disappears everywhere, but its SKU stays reserved |
@@ -63,6 +69,12 @@ curl -s $(aws cloudformation describe-stacks --stack-name inventory-service --qu
 | 19 | [Lessons learned](lessons-learned.md) and [security review](security-review.md) | Ten failed deploy attempts, each diagnosed from CloudTrail or stack events; the least-privilege roles; no secrets in the repository |
 | 20 | Back to **Actions** | The deploy has finished green |
 
+DynamoDB check for step 8 (the alert recorder's table):
+
+```bash
+aws dynamodb scan --table-name inventory-alerts --query "Items[].[sku.S,cause.S,quantity.N,occurredAt.S]" --output text
+```
+
 Test alarm for step 17:
 
 ```bash
@@ -75,8 +87,8 @@ aws cloudwatch set-alarm-state --alarm-name inventory-api-5xx --state-value OK -
 |---|---|
 | Why Fargate rather than EC2? | No servers to patch or size, and you pay per task; at this scale the saved effort outweighs EC2's lower price at steady high load (design note 2.1) |
 | What stops two people over-selling stock? | One conditional `UPDATE ... WHERE quantity + delta >= 0`; Postgres row locks serialise concurrent changes (2.2) |
-| How do you avoid losing or duplicating alerts? | The alert is written in the same transaction as the stock change (outbox). The SNS/SQS/Lambda delivery is designed, and deferred (section 4) |
-| What isn't built? | Design note, section 4: the asynchronous alert pipeline, the queued import, a refactor and the performance tests, each with a working stand-in |
+| How do you avoid losing or duplicating alerts? | The alert is written in the same transaction as the stock change (outbox), then published to SNS at least once. The Lambda stores it with a conditional put on the event's id, so a repeated message creates no second record; a message that keeps failing goes to a dead-letter queue, which raises an alarm |
+| What isn't built? | Design note, section 4: reading alerts through API Gateway, the queued import, a refactor and the performance tests, each with a working stand-in |
 | How is it secured? | Private subnets, private buckets, secrets in Secrets Manager, OIDC deploys behind approval, least-privilege roles ([security review](security-review.md)) |
 | What did you learn? | [Lessons learned](lessons-learned.md): read AWS's own records first, and run a pipeline end to end before relying on it |
 
