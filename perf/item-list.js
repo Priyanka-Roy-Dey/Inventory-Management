@@ -1,6 +1,6 @@
 // k6 load test of the item list (INV-30, A9: p95 < 500 ms with about 10,000 items).
 //
-//   k6 run -e BASE_URL=https://<id>.cloudfront.net -e TOKEN=<access token> perf/item-list.js
+//   k6 run -e BASE_URL=https://<id>.cloudfront.net -e TOKEN=<access token> [-e VUS=5] perf/item-list.js
 //
 // Read-only: it only lists, searches and opens items. The access token lasts 15 minutes; the test takes 4.
 import http from 'k6/http'
@@ -8,15 +8,16 @@ import { check } from 'k6'
 
 const BASE_URL = __ENV.BASE_URL
 const TOKEN = __ENV.TOKEN
+// Users browsing at once, each without pauses (-e VUS=5). The default of 20 is far more than the sandbox's real traffic.
+const VUS = Number(__ENV.VUS || 20)
 
 export const options = {
   scenarios: {
-    // 20 users browsing at once, each without pauses: far more than the sandbox's real traffic.
     browse: {
       executor: 'ramping-vus',
       stages: [
-        { duration: '30s', target: 20 },
-        { duration: '3m', target: 20 },
+        { duration: '30s', target: VUS },
+        { duration: '3m', target: VUS },
         { duration: '30s', target: 0 },
       ],
     },
