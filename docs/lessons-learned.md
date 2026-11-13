@@ -101,6 +101,24 @@ Deploy #2 was re-run once (attempt 2), and Deploy #6 twice (attempts 2 and 3), b
 
 ## Other incidents
 
+### Low-stock alerts did not arrive (INV-17, INV-18)
+
+- **Symptom:** after the alert stacks were deployed, no email arrived and the DynamoDB table stayed empty, with no errors anywhere.
+- **Diagnosis, hop by hop**, from AWS's own counters and the API log:
+  - The API task had the topic (`INVENTORY_ALERTS_TOPICARN`) and ran the new image.
+  - SNS showed 1 notification delivered and 0 failed; SQS showed 0 messages sent; the Lambda had no invocations.
+  - `aws lambda list-event-source-mappings` returned nothing: **the queue was not connected to the Lambda.**
+  - A test message published straight to SNS from CloudShell reached the queue and, once the trigger existed, DynamoDB.
+- **Root causes, three separate ones:**
+  1. **No trigger in AWS.** The alerts stack had been deployed from an earlier version of `alerts.yaml`, before the Lambda and its SQS trigger were added. Redeploying the stack from `main` created them.
+  2. **No event to send.** No item had crossed its reorder level yet: the first test item was never created, so there was nothing in the outbox to publish.
+  3. **An invisible publisher.** It logged nothing when it started or sent, so CloudWatch could not show whether it was running. Logging was added (#54); the end-to-end test then showed `Published 1 of 1 pending outbox events` 3 seconds after the stock-out.
+- **A theory that was wrong:** that the on/off switch ignored the ECS environment variable. A test that copies the ECS environment exactly showed the existing condition worked, so it was kept, and the test stays as a guard (`AlertPublishingSwitchTests`).
+- **Lessons:**
+  - Log the start and the outcome of every background job; silence must not be ambiguous.
+  - Test each hop separately (here, by publishing to SNS by hand) before changing code.
+  - Redeploy every stack a pull request changes, from `main`, after merging.
+
 ### The first Admin's secret was deleted
 
 - **What happened:** `aws secretsmanager delete-secret --secret-id inventory/admin` was run while the secret still belonged to the database stack. Afterwards the secret could not be found or restored, so the stack that owned it could not be repaired.
