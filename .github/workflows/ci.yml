@@ -83,6 +83,22 @@ jobs:
             api/target/site/jacoco/jacoco.xml
           retention-days: 3
 
+  infra:
+    name: Infra - Lambda tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Runs the alert recorder's code exactly as it is inline in infra/alerts.yaml (INV-18).
+      - name: Test the alert recorder
+        run: python -m unittest discover -s infra/tests -v
+
   sonarcloud:
     name: SonarCloud - quality gate
     needs: [web, api]

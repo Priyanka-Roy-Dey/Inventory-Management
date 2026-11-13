@@ -10,7 +10,7 @@ A web application where staff track stock levels, record stock movements, import
 - **Items:** create, edit, search, filter (category, low stock, attributes, delivery pincode, price range), sort and page. Only an Admin can delete, and deleting keeps the SKU reserved.
 - **Stock movements:** stock in, stock out and adjustments with a reason, plus a history per item. A stock-out larger than the stock is refused, also when two people change stock at the same moment.
 - **Item images:** uploaded with a stock-in, straight from the browser to S3.
-- **Low-stock alerts:** recorded when a change takes an item to or below its reorder level, and listed on the Alerts page.
+- **Low-stock alerts:** recorded when a change takes an item to or below its reorder level, listed on the Alerts page, and emailed to the manager.
 - **CSV import:** create, update or restore items in bulk, with row-numbered errors for bad rows.
 - **Dashboard:** stock totals, low-stock count and recent movements.
 - **Users (Admin):** create users and reset passwords with one-time temporary passwords.
@@ -42,6 +42,10 @@ flowchart LR
     sm[Secrets Manager<br/>+ KMS]
     cw[CloudWatch<br/>logs, alarms, dashboard]
     sns[SNS<br/>alarm email]
+    lowstock[SNS<br/>low-stock topic]
+    queue[(SQS alert queue<br/>+ dead-letter queue)]
+    recorder[Lambda<br/>alert recorder]
+    alerts[(DynamoDB<br/>alerts)]
   end
 
   user -->|"/"| cf
@@ -54,6 +58,9 @@ flowchart LR
   ecs -.->|via NAT| sm
   ecr -.->|image pull| ecs
   ecs -.-> cw --> sns
+  ecs -->|outbox publisher| lowstock
+  lowstock -->|email| manager([Manager])
+  lowstock --> queue --> recorder -->|once per event| alerts
   gh -->|"push image (OIDC role, after approval)"| ecr
   gh -->|update service stack| ecs
   gh -->|publish build| web
@@ -62,6 +69,7 @@ flowchart LR
 - The browser only talks to **CloudFront**: it serves the React app from a private bucket and forwards `/api/*` to the load balancer, so there is one HTTPS address and no CORS for the API.
 - The **API** and **database** sit in private subnets; only the load balancer is reachable from the internet, and only the API's security group can reach the database.
 - **Images** go straight between the browser and S3 through short-lived presigned URLs that the API issues.
+- **Low-stock alerts** are written in the same transaction as the stock change (outbox), then published to SNS, which emails the manager and queues them in SQS for a Lambda that records each one once in DynamoDB.
 - **Secrets** (database credentials, JWT signing key, first Admin) come from Secrets Manager and are injected into the tasks.
 - **GitHub Actions** deploys with short-lived credentials from an OIDC role, only after a reviewer approves the `sandbox` environment.
 
@@ -81,7 +89,7 @@ The decisions behind this, and what is planned but not built yet, are in the [de
 
 - **Back end:** Java 17, Spring Boot, PostgreSQL, Flyway, Spring Security (JWT), springdoc-openapi
 - **Front end:** React (functional components and hooks), React Router, MUI, Vite, Vitest and Testing Library
-- **AWS:** ECS Fargate, ALB, ECR, RDS PostgreSQL, S3, CloudFront, Secrets Manager, KMS, CloudWatch, SNS, CloudTrail, CloudFormation, IAM, Application Auto Scaling. Planned: SQS, Lambda, API Gateway and DynamoDB for alerts ([design note](docs/design-note.md#4-deferred-work)).
+- **AWS:** ECS Fargate, ALB, ECR, RDS PostgreSQL, S3, CloudFront, Secrets Manager, KMS, CloudWatch, SNS, SQS, Lambda, DynamoDB, CloudTrail, CloudFormation, IAM, Application Auto Scaling. Planned: API Gateway for reading alerts ([design note](docs/design-note.md#4-deferred-work)).
 - **CI/CD:** GitHub Actions with OIDC to AWS
 
 ## Prerequisites
