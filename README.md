@@ -192,4 +192,5 @@ When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in t
 - [Backlog](docs/backlog.md)
 - [Lessons learned](docs/lessons-learned.md), including the failed deployment exercise (INV-28)
 - [Security review](docs/security-review.md): IAM, CloudTrail and secrets (INV-29)
+- [Performance and accessibility](docs/performance.md): 10,000-item load test and Lighthouse against A9 (INV-30)
 - [Demo and clean-up](docs/demo.md): demo script, and how to scale the sandbox down and up again (INV-32)
