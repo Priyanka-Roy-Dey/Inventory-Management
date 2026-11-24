@@ -57,8 +57,9 @@ jobs:
             exit 0
           fi
           aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO_URI%%/*}"
-          docker build --pull -t "$REPO_URI:$TAG" api
-          docker push "$REPO_URI:$TAG"
+          # One plain image, no provenance or SBOM attestations: with them the push is an OCI image index, which ECR
+          # basic scanning cannot scan, so the next step would never see a result.
+          docker buildx build --pull --provenance=false --sbom=false --push -t "$REPO_URI:$TAG" api
 
       - name: Stop on HIGH or CRITICAL vulnerabilities
         run: |
