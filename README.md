@@ -108,6 +108,8 @@ The decisions behind this, and what is planned but not built yet, are in the [de
 
 ## Running locally
 
+The short version is below. The [local development guide](docs/local-development.md) has every test command, all environment variables, and fixes for common problems.
+
 ### API (`api/`)
 
 The first Admin is created at startup from two environment variables (only if no Admin exists yet). Choose your own values; never commit them.
@@ -188,6 +190,7 @@ When CI passes on `main`, `.github/workflows/deploy.yml` waits for approval in t
 
 ## Documentation
 
+- [Local development](docs/local-development.md): running the API and web app, the tests, and environment variables
 - [Design note](docs/design-note.md)
 - [Backlog](docs/backlog.md)
 - [Lessons learned](docs/lessons-learned.md), including the failed deployment exercise (INV-28)
